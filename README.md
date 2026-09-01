@@ -1,6 +1,6 @@
 # RF Hunter
 
-**RF security research platform for authorized lab use** — wardrive-style scanning with HackRF, BLE, optional GPS and Wi‑Fi correlation, live monitoring, protocol decode, and RF replay workflows.
+**RF security research platform for authorized lab use** — wardrive-style scanning with HackRF, BLE, GPS-backed map, optional Wi‑Fi correlation, live monitoring, protocol decode, and RF replay workflows.
 
 Dual interface: **web dashboard** (FastAPI + static frontend) and **terminal UI** (Textual). Built for field labs, capture triage, and structured device tracking — not for unauthorized spectrum use.
 
@@ -63,10 +63,17 @@ Fingerprinting uses OUI, BLE company IDs, and YAML rules to refine vendor and de
 
 ## Requirements
 
+### Hardware
+
+- **[HackRF One](https://greatscottgadgets.com/hackrf/)** (or compatible) with **firmware up to date** — check with `hackrf_info`; flash the latest release from the [HackRF docs](https://hackrf.readthedocs.io/en/latest/updating_firmware.html) if needed. Install the host tools: `hackrf_sweep`, `hackrf_transfer`.
+- **GPS receiver** (USB or serial, u-blox / NMEA) running through **`gpsd`** — **required for the wardrive map** (hunter trail, live position, device geolocation pins). Without a GPS fix the map stays on a neutral world view and pins cannot be placed on your route.
+- Optional: second Wi‑Fi NIC (`wlan1` by default) for AP scan and correlation.
+
+### Software
+
 - Linux (Debian / Kali-style systems tested)
 - Python **3.11+**
-- [HackRF](https://greatscottgadgets.com/hackrf/) tools: `hackrf_sweep`, `hackrf_transfer`
-- Optional: `rtl_433`, `multimon-ng`, BlueZ/BLE, `gpsd`, `iw` (Wi‑Fi scan)
+- **Decode / companion stack** — install as many modules as your targets need: `rtl_433`, `multimon-ng`, BlueZ/BLE, `iw` (Wi‑Fi scan). More modules = broader catalog coverage (TPMS, POCSAG, ADS‑B helpers, BLE GATT, etc.).
 - Docker optional — privileged, USB passthrough, host network (see `docker-compose.yml`)
 
 ---
@@ -119,7 +126,7 @@ python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8081
 
 Open **http://localhost:8081**
 
-The wardrive map uses **VersaTiles / OpenStreetMap** raster tiles (no API key). Basemap falls back automatically if a provider blocks requests.
+The wardrive map uses **VersaTiles / OpenStreetMap** raster tiles (no API key). It needs a **GPS fix via `gpsd`** to center on your position, draw the hunter trail, and pin devices to your route — start `gpsd` against your receiver before wardriving. Basemap falls back automatically if a tile provider blocks requests.
 
 ### Docker
 
@@ -140,7 +147,7 @@ Service listens on **8081** with `network_mode: host`, USB bind-mount, and D‑B
 | `RF_HUNTER_CATALOG` | `backend/data/device_catalog.yaml` | Device type catalog |
 | `HACKRF_SERIAL` | *(empty)* | Lock to one HackRF when several are connected |
 | `RF_HUNTER_WIFI_IFACE` | `wlan1` | Interface for parallel Wi‑Fi scan |
-| `GPSD_HOST` / `GPSD_PORT` | `127.0.0.1` / `2947` | GPS fix for hunter trail and map |
+| `GPSD_HOST` / `GPSD_PORT` | `127.0.0.1` / `2947` | GPS fix via `gpsd` — required for map trail and device pins |
 
 See also [`AGENTS.md`](AGENTS.md) for architecture notes and lab gotchas.
 
