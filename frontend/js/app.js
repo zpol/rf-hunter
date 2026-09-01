@@ -34,6 +34,7 @@
   let wifiLiveEnabled = true;
   let map = null;
   let mapReady = false;
+  let mapBasemapLayer = null;
   let mapFollow = true;
   let hunterMarker = null;
   let trailLine = null;
@@ -1407,6 +1408,49 @@
     els.mapFixLabel.textContent = `${Number(gpsFix.lat).toFixed(6)}, ${Number(gpsFix.lon).toFixed(6)} · alt ${alt} · ${spd} · trail ${gpsTrail.length} · wifi ${wifiAps.length}`;
   }
 
+  /** Basemap providers — no API key. Carto dark often blocks in-browser now. */
+  const MAP_TILE_SOURCES = [
+    {
+      id: "versatiles",
+      url: "https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}.png",
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · <a href="https://versatiles.org">VersaTiles</a>',
+      maxZoom: 19,
+    },
+    {
+      id: "osm",
+      url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    },
+  ];
+
+  function addMapBasemap() {
+    if (!map || mapBasemapLayer) return;
+    let idx = 0;
+    const mount = () => {
+      const src = MAP_TILE_SOURCES[idx];
+      if (!src) return;
+      if (mapBasemapLayer) {
+        map.removeLayer(mapBasemapLayer);
+        mapBasemapLayer = null;
+      }
+      mapBasemapLayer = L.tileLayer(src.url, {
+        attribution: src.attribution,
+        maxZoom: src.maxZoom,
+      });
+      mapBasemapLayer.on("tileerror", () => {
+        if (idx >= MAP_TILE_SOURCES.length - 1) return;
+        idx += 1;
+        log(`Map tiles: ${src.id} failed — trying ${MAP_TILE_SOURCES[idx].id}`);
+        mount();
+      });
+      mapBasemapLayer.addTo(map);
+    };
+    mount();
+  }
+
   function ensureMap() {
     if (mapReady || typeof L === "undefined") return;
     const el = $("#wardrive-map");
@@ -1420,11 +1464,7 @@
       attributionControl: true,
     }).setView([initLat, initLon], initZoom);
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
-      subdomains: "abcd",
-      maxZoom: 20,
-    }).addTo(map);
+    addMapBasemap();
 
     mapLayerGroup = L.layerGroup().addTo(map);
     wifiLayerGroup = L.layerGroup().addTo(map);

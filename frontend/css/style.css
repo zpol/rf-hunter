@@ -283,6 +283,10 @@ body {
   background: #0b1220;
   font-family: var(--font);
 }
+/* Light OSM/VersaTiles tiles → dark-ish basemap without a paid Carto key */
+.leaflet-tile-pane {
+  filter: brightness(0.55) invert(1) contrast(1.05) hue-rotate(180deg);
+}
 .leaflet-popup-content-wrapper {
   background: #0f1724 !important;
   color: #e2e8f0 !important;
