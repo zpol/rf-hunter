@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RF Hunter v2 — Wardrive</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css?v=51" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="brand">
+        <span class="logo">◈</span>
+        <div>
+          <h1>RF Hunter <span class="ver">v2</span></h1>
+          <p class="subtitle">Wardrive · filters · vulns · dashboards</p>
+        </div>
+      </div>
+      <div class="header-status">
+        <button id="btn-rf-clone" class="btn btn-clone" type="button" title="RF remote clone lab">◈ RF CLONE</button>
+        <span id="wifi-status" class="badge badge-muted">Wi‑Fi …</span>
+        <span id="gps-status" class="badge badge-muted">GPS …</span>
+        <span id="hackrf-status" class="badge badge-muted">HackRF …</span>
+        <span id="scan-status" class="badge badge-muted">Idle</span>
+        <span id="vuln-status" class="badge badge-muted">Vulns idle</span>
+        <span id="track-count" class="badge badge-muted">0 devices</span>
+      </div>
+    </header>
+
+    <main class="layout layout-v2">
+      <aside class="panel panel-config">
+        <h2>Scan</h2>
+
+        <div class="mode-toggle">
+          <label class="mode-opt">
+            <input type="radio" name="mode" value="wardrive" checked />
+            <span>Wardrive</span>
+          </label>
+          <label class="mode-opt">
+            <input type="radio" name="mode" value="once" />
+            <span>Once</span>
+          </label>
+          <label class="mode-opt">
+            <input type="radio" name="mode" value="full_sweep" />
+            <span>Full sweep</span>
+          </label>
+        </div>
+        <p class="hint" id="mode-hint">Wardrive loops selected bands. Full sweep = HackRF 1–6000 MHz.</p>
+
+        <label class="field">
+          <span>Duration / BLE window (s)</span>
+          <input type="number" id="duration" value="20" min="5" max="600" />
+        </label>
+
+        <div class="field-row">
+          <label class="field">
+            <span>LNA (dB)</span>
+            <input type="number" id="lna" value="32" min="0" max="40" step="8" />
+          </label>
+          <label class="field">
+            <span>VGA (dB)</span>
+            <input type="number" id="vga" value="36" min="0" max="62" step="2" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Sweep passes / loop</span>
+          <input type="number" id="passes" value="30" min="8" max="500" />
+        </label>
+
+        <div class="actions">
+          <button id="btn-scan" class="btn btn-wardrive">▶ Start</button>
+          <button id="btn-stop" class="btn btn-danger">■ Stop all</button>
+        </div>
+        <div class="actions">
+          <button id="btn-cleanup" class="btn btn-ghost-danger" type="button">⌫ Cleanup results</button>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-bar"><div id="progress" class="progress-fill"></div></div>
+          <span id="progress-label" class="progress-label">0%</span>
+        </div>
+        <p class="sweep-live is-idle" id="sweep-live">Idle — pick a mode and start</p>
+
+        <h2 class="section-title">Vuln scan</h2>
+        <p class="hint" id="vuln-hint">Tick devices in the list (cards / list / table), or triage all.</p>
+        <div class="actions stacked">
+          <button id="btn-vuln-quick" class="btn btn-attack">⚡ Quick triage (all)</button>
+          <button id="btn-vuln-full" class="btn btn-deep">🔬 Full dive (all)</button>
+          <button id="btn-tpms-decode" class="btn btn-deep">🛞 Decode all TPMS</button>
+        </div>
+        <p class="hint" id="triage-sel-hint">Triage selection: 0</p>
+        <p class="hint" id="tpms-stats-hint">TPMS: —</p>
+
+        <h2 class="section-title">Lab safety / export</h2>
+        <div class="actions stacked">
+          <button id="btn-tx-arm" class="btn btn-ghost-danger" type="button">🔒 TX disarmed</button>
+          <button id="btn-export-csv" class="btn btn-ghost" type="button">⬇ Export CSV</button>
+          <button id="btn-export-json" class="btn btn-ghost" type="button">⬇ Export JSON</button>
+          <button id="btn-captures" class="btn btn-ghost" type="button">📁 Captures</button>
+        </div>
+        <p class="hint" id="tx-arm-hint">Arm TX before Replay transmit (315/433/868 only).</p>
+        <div class="progress-wrap">
+          <div class="progress-bar"><div id="vuln-progress" class="progress-fill vuln"></div></div>
+          <span id="vuln-progress-label" class="progress-label">0%</span>
+        </div>
+        <div id="vuln-counts" class="vuln-counts"></div>
+
+        <h2 class="section-title">Device types</h2>
+        <p class="hint">
+          <span id="selected-count" class="selected-count">0 selected</span>
+        </p>
+        <div id="category-tabs" class="tabs"></div>
+        <div class="actions row-tight">
+          <button type="button" id="btn-select-all" class="btn btn-ghost hidden">Select all in tab</button>
+          <button type="button" id="btn-select-wow" class="btn btn-ghost wow-btn">★ Select WOW types</button>
+          <button type="button" id="btn-select-lab-tvs" class="btn btn-ghost wow-btn">▣ Lab TVs</button>
+          <button type="button" id="btn-select-portapack" class="btn btn-ghost">◈ PortaPack pack</button>
+          <button type="button" id="btn-demo-mode" class="btn btn-wardrive wow-btn">★ Demo Mode (BLE)</button>
+        </div>
+        <div id="device-grid" class="device-grid"></div>
+      </aside>
+
+      <section class="panel panel-results">
+        <div class="view-tabs">
+          <button type="button" class="view-tab active" data-view="devices">Devices</button>
+          <button type="button" class="view-tab" data-view="map">Map</button>
+          <button type="button" class="view-tab" data-view="dashboard">Dashboard</button>
+        </div>
+
+        <div id="view-devices" class="view-pane">
+          <div class="results-header">
+            <h2 id="results-title">Live devices <span id="detection-count" class="count">0</span></h2>
+            <div class="layout-switch" id="layout-switch" role="group" aria-label="Device layout">
+              <button type="button" class="layout-btn active" data-layout="cards" title="Card grid">▣ Cards</button>
+              <button type="button" class="layout-btn" data-layout="list" title="Compact list">☰ List</button>
+              <button type="button" class="layout-btn" data-layout="table" title="Sortable table">▦ Table</button>
+            </div>
+          </div>
+
+          <div class="filters">
+            <input type="search" id="filter-text" placeholder="Filter name / MAC / freq…" />
+            <select id="filter-type">
+              <option value="">All types</option>
+            </select>
+            <select id="filter-radio">
+              <option value="">All radios</option>
+              <option value="hackrf">HackRF</option>
+              <option value="ble">BLE</option>
+              <option value="wifi">Wi‑Fi</option>
+              <option value="adsb">ADS-B</option>
+              <option value="ais">AIS</option>
+            </select>
+            <select id="filter-sev">
+              <option value="">All severity</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="unknown">Unknown</option>
+            </select>
+            <select id="sort-by" title="Sort order">
+              <option value="wow" selected>Sort: WOW first</option>
+              <option value="smart">Live + coverage</option>
+              <option value="coverage">Coverage (strongest)</option>
+              <option value="newest">Newest first</option>
+              <option value="active">Active only first</option>
+              <option value="hits">Most hits</option>
+              <option value="severity">Severity</option>
+              <option value="name">Name A–Z</option>
+            </select>
+            <select id="filter-wow" title="Wow filter">
+              <option value="">All tiers</option>
+              <option value="wow">WOW only</option>
+              <option value="solid">Solid+</option>
+            </select>
+            <select id="filter-quality" title="Detection quality — cut false positives">
+              <option value="">All quality</option>
+              <option value="hide_noise" selected>Hide noise / FP</option>
+              <option value="likely">Likely+</option>
+              <option value="confirmed">Confirmed only</option>
+              <option value="noise">Noise / FP only</option>
+            </select>
+            <select id="filter-evidence" title="Evidence type">
+              <option value="">All evidence</option>
+              <option value="decode">Decode / identity</option>
+              <option value="presence">Presence peaks</option>
+            </select>
+            <button type="button" id="btn-clear-filters" class="btn-mini">Clear</button>
+          </div>
+          <div class="triage-toolbar" id="triage-toolbar">
+            <label class="triage-check-all" title="Select all devices matching current filters">
+              <input type="checkbox" id="chk-triage-visible" />
+              <span>Select visible</span>
+            </label>
+            <button type="button" id="btn-triage-clear" class="btn-mini">Clear selection</button>
+            <span class="triage-sel-count" id="triage-sel-count">0 selected for triage</span>
+          </div>
+
+          <div id="results-list" class="results-list device-cards">
+            <div class="empty-state">
+              <p>No devices yet.</p>
+              <p class="hint">Select types and start wardrive.</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="view-map" class="view-pane hidden">
+          <div class="map-toolbar">
+            <div class="map-toolbar-left">
+              <span id="map-fix-label" class="map-fix-label">Waiting for GPS fix…</span>
+              <span id="map-pin-count" class="badge badge-muted">0 pins</span>
+            </div>
+            <div class="map-toolbar-right">
+              <button type="button" class="btn-mini" id="btn-map-fit">Fit all</button>
+              <button type="button" class="btn-mini" id="btn-map-follow">Follow GPS</button>
+              <button type="button" class="btn-mini" id="btn-map-trail-clear">Clear trail</button>
+            </div>
+          </div>
+          <div class="map-filters" id="map-filters">
+            <div class="map-filter-presets">
+              <button type="button" class="btn-mini map-preset" data-map-preset="all">All</button>
+              <button type="button" class="btn-mini map-preset" data-map-preset="traffic">Traffic</button>
+              <button type="button" class="btn-mini map-preset" data-map-preset="wardrive">Wardrive</button>
+            </div>
+            <div class="map-filter-toggles" role="group" aria-label="Map layer filters">
+              <button type="button" class="map-filter on" data-map-filter="rf" title="Toggle RF pins"><i class="dot rf"></i> RF</button>
+              <button type="button" class="map-filter on" data-map-filter="ble" title="Toggle BLE pins"><i class="dot ble"></i> BLE</button>
+              <button type="button" class="map-filter on" data-map-filter="wifi" title="Toggle Wi‑Fi APs"><i class="dot wifi"></i> Wi‑Fi</button>
+              <button type="button" class="map-filter on" data-map-filter="adsb" title="Toggle ADS‑B aircraft"><i class="dot adsb"></i> ADS‑B</button>
+              <button type="button" class="map-filter on" data-map-filter="ais" title="Toggle AIS vessels"><i class="dot ais"></i> AIS</button>
+              <button type="button" class="map-filter on" data-map-filter="hunter" title="Toggle hunter GPS"><i class="dot hunter"></i> Hunter</button>
+              <button type="button" class="map-filter on" data-map-filter="trail" title="Toggle GPS trail"><i class="dot trail"></i> Trail</button>
+              <button type="button" class="map-filter on" data-map-filter="hide_noise" title="Hide noise / likely false positives">Hide FP</button>
+              <button type="button" class="map-filter" data-map-filter="decode_only" title="Only decoded traffic / identity">Decode</button>
+              <button type="button" class="map-filter" data-map-filter="critical_only" title="Show only critical / high"><i class="dot critical"></i> Crit+</button>
+            </div>
+          </div>
+          <div id="wardrive-map" class="wardrive-map"></div>
+          <p class="map-legend-hint hint">Click layers to filter · Trail = path · Pins = GPS at detection / live traffic</p>
+        </div>
+
+        <div id="view-dashboard" class="view-pane hidden">
+          <div class="dash-grid">
+            <article class="dash-card wide" id="dash-findings-card">
+              <h3>Live findings</h3>
+              <div id="dash-findings" class="dash-findings">
+                <div class="hint">Run Demo Mode or Quick triage to populate.</div>
+              </div>
+            </article>
+            <article class="dash-card">
+              <h3>By device type</h3>
+              <div class="cake-wrap">
+                <div id="cake-type" class="cake"></div>
+                <ul id="legend-type" class="cake-legend"></ul>
+              </div>
+            </article>
+            <article class="dash-card">
+              <h3>By severity</h3>
+              <div class="cake-wrap">
+                <div id="cake-sev" class="cake"></div>
+                <ul id="legend-sev" class="cake-legend"></ul>
+              </div>
+            </article>
+            <article class="dash-card">
+              <h3>By radio</h3>
+              <div class="cake-wrap">
+                <div id="cake-radio" class="cake"></div>
+                <ul id="legend-radio" class="cake-legend"></ul>
+              </div>
+            </article>
+            <article class="dash-card wide">
+              <h3>Severity breakdown</h3>
+              <div id="sev-bars" class="sev-bars"></div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel panel-detail">
+        <h2>Focus</h2>
+        <div id="focus-empty" class="empty-state compact">
+          <p>Click a device to focus.</p>
+          <p class="hint">Monitor · Dive · Stop all stops everything</p>
+        </div>
+        <div id="focus-panel" class="focus-panel hidden">
+          <div class="focus-title" id="focus-title">—</div>
+          <div id="focus-identity" class="focus-identity"></div>
+          <div class="focus-bar-wrap">
+            <div class="sig-bar big" id="focus-bar"><div class="sig-fill" style="width:0%"></div></div>
+            <div class="focus-db" id="focus-db">—</div>
+          </div>
+          <div class="focus-hint" id="focus-hint"></div>
+          <div class="sparkline" id="focus-spark"></div>
+          <div id="focus-traffic" class="traffic-focus hidden"></div>
+          <dl class="meta-grid" id="focus-meta"></dl>
+          <div id="focus-leak" class="focus-block"></div>
+          <div id="focus-adv" class="focus-block"></div>
+          <div id="focus-gatt-snap" class="focus-block"></div>
+          <div id="focus-wifi" class="focus-block"></div>
+          <div id="focus-decode" class="focus-block"></div>
+          <div class="risk-box" id="focus-risk"></div>
+          <div class="card-actions">
+            <button class="btn btn-attack" id="btn-replay">▶ Attack</button>
+            <button class="btn btn-deep" id="btn-monitor">Monitor</button>
+            <button class="btn btn-wardrive hidden" id="btn-fpv-decode" type="button">🖼 Decode FPV</button>
+            <button class="btn btn-deep" id="btn-dive">Deep dive</button>
+            <button class="btn btn-wardrive" id="btn-see-map">🗺 See on map</button>
+            <button class="btn btn-deep" id="btn-json">JSON</button>
+          </div>
+          <p class="hint" id="focus-wow-hint"></p>
+        </div>
+        <h2 class="section-title">Live log</h2>
+        <pre id="log" class="log"></pre>
+      </aside>
+    </main>
+  </div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content modal-wide">
+      <header class="modal-header">
+        <div class="modal-heading">
+          <h3 id="modal-title">Details</h3>
+          <p id="modal-subtitle" class="modal-subtitle"></p>
+        </div>
+        <div class="modal-header-actions">
+          <button type="button" id="modal-toggle-raw" class="btn-mini hidden">Raw JSON</button>
+          <button id="modal-close" class="btn-icon" aria-label="Close">✕</button>
+        </div>
+      </header>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="replay-modal" class="modal hidden">
+    <div class="modal-backdrop" data-replay-dismiss></div>
+    <div class="modal-content confirm-box replay-box">
+      <header class="modal-header">
+        <div class="modal-heading">
+          <h3 id="replay-title">Replay lab</h3>
+          <p class="modal-subtitle" id="replay-subtitle">Authorized lab use only</p>
+        </div>
+        <button type="button" class="btn-icon" data-replay-dismiss aria-label="Close">✕</button>
+      </header>
+      <div class="confirm-body" id="replay-body"></div>
+      <div class="confirm-actions replay-actions">
+        <button type="button" class="btn btn-ghost" data-replay-dismiss>Cerrar</button>
+        <button type="button" class="btn btn-deep" id="btn-replay-listen">🎧 Escuchar</button>
+        <button type="button" class="btn btn-attack" id="btn-replay-tx" disabled>▶ Replicar TX</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="clone-modal" class="modal hidden">
+    <div class="modal-backdrop" data-clone-dismiss></div>
+    <div class="modal-content confirm-box clone-box">
+      <header class="modal-header">
+        <div class="modal-heading">
+          <h3>RF CLONE</h3>
+          <p class="modal-subtitle">Lab only · listen → record → TX (315 / 433 / 868)</p>
+        </div>
+        <button type="button" class="btn-icon" data-clone-dismiss aria-label="Close">✕</button>
+      </header>
+      <div class="confirm-body clone-body">
+        <p class="hint">Pick a remote type, watch the spectrum while you press it, then record and replay (Arm TX in the sidebar).</p>
+        <div id="clone-presets" class="clone-presets" role="listbox" aria-label="Remote preset"></div>
+        <div class="clone-freq mono" id="clone-freq">— MHz</div>
+        <div class="clone-spectrum-wrap">
+          <canvas id="clone-spectrum" width="640" height="160" aria-label="Live spectrum"></canvas>
+          <div class="clone-peak mono" id="clone-peak">peak — · noise —</div>
+        </div>
+        <div id="clone-status" class="replay-status">Select an icon, then press Live.</div>
+        <div class="clone-opts" style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;margin:0.4rem 0 0.2rem">
+          <label class="hint" for="clone-record-dur">Record</label>
+          <select id="clone-record-dur" class="mono" title="Shorter = less clip; tap 2–3 times during record">
+            <option value="5">5s · taps</option>
+            <option value="8" selected>8s</option>
+            <option value="12">12s</option>
+          </select>
+          <label class="hint" for="clone-tx-source">TX IQ</label>
+          <select id="clone-tx-source" class="mono" title="burst = all presses (better than single best)">
+            <option value="burst" selected>burst</option>
+            <option value="full">full</option>
+            <option value="best">best press</option>
+          </select>
+          <label class="hint" for="clone-tx-repeats">×</label>
+          <select id="clone-tx-repeats" class="mono" title="Replay the IQ multiple times">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+          </select>
+        </div>
+        <div id="clone-tx-progress" class="clone-tx-progress" aria-live="polite">
+          <div class="clone-tx-label" id="clone-tx-label">TX idle</div>
+          <div class="progress-wrap">
+            <div class="progress-bar"><div id="clone-tx-fill" class="progress-fill" style="width:0%"></div></div>
+            <span id="clone-tx-pct" class="progress-label">0%</span>
+          </div>
+        </div>
+      </div>
+        <div class="confirm-actions replay-actions">
+        <button type="button" class="btn btn-ghost" data-clone-dismiss>Close</button>
+        <button type="button" class="btn btn-ghost" id="btn-clone-hunt" title="Sweep 315/433/868 while you press">Find freq</button>
+        <button type="button" class="btn btn-ghost" id="btn-clone-compare" title="Compare recent CAPs for shared PWM pattern">Compare</button>
+        <button type="button" class="btn btn-ghost" id="btn-clone-live">Live</button>
+        <button type="button" class="btn btn-deep" id="btn-clone-record" disabled>Record</button>
+        <button type="button" class="btn btn-attack" id="btn-clone-tx" disabled>▶ Replay TX</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm last so it stacks above clone/replay even before CSS z-index -->
+  <div id="confirm-modal" class="modal hidden">
+    <div class="modal-backdrop" data-confirm-dismiss></div>
+    <div class="modal-content confirm-box">
+      <header class="modal-header">
+        <div class="modal-heading">
+          <h3 id="confirm-title">Confirm</h3>
+          <p class="modal-subtitle" id="confirm-subtitle"></p>
+        </div>
+        <button type="button" class="btn-icon" data-confirm-dismiss aria-label="Close">✕</button>
+      </header>
+      <div class="confirm-body" id="confirm-body"></div>
+      <div class="confirm-actions">
+        <button type="button" class="btn btn-ghost" data-confirm-dismiss>Cancel</button>
+        <button type="button" class="btn btn-ghost hidden" id="btn-confirm-alt">Alt</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-ok">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="tx-live-overlay" class="tx-live-overlay hidden" aria-live="assertive" aria-hidden="true">
+    <div class="tx-live-card">
+      <div class="tx-live-title">HackRF transmitting</div>
+      <div class="tx-live-label" id="tx-live-label">Starting…</div>
+      <div class="progress-wrap">
+        <div class="progress-bar"><div id="tx-live-fill" class="progress-fill tx-live-fill" style="width:0%"></div></div>
+        <span id="tx-live-pct" class="progress-label">0%</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js?v=65"></script>
+</body>
+</html>

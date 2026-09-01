@@ -1,0 +1,142 @@
+# Lab fingerprint rules — nmap-style identify for BLE advertisements (+ OUI / Company ID).
+# Higher priority wins. Matched fields are AND within a rule unless noted.
+
+rules:
+  - id: tuya_company_uuid
+    priority: 100
+    match:
+      company_id_any: [0x07D0, 2000]
+      service_uuid_contains_any: ["a201", "fd50", "0000a201", "0000fd50"]
+    identify:
+      vendor: Tuya
+      family: Smart Life / OEM IoT
+      confidence: high
+
+  - id: tuya_name
+    priority: 90
+    match:
+      name_regex: "(?i)^(TY|TUYA[_\\-]?)"
+    identify:
+      vendor: Tuya
+      family: Smart Life / OEM IoT
+      confidence: high
+
+  - id: tuya_uuid_only
+    priority: 80
+    match:
+      service_uuid_contains_any: ["a201", "fd50"]
+    identify:
+      vendor: Tuya
+      family: Smart Life / OEM IoT
+      confidence: medium
+
+  - id: samsung_company
+    priority: 88
+    match:
+      company_id_any: [0x0075, 0x75, 117]
+    identify:
+      vendor: Samsung Electronics Co. Ltd.
+      family: SmartThings / Smart TV BLE
+      confidence: high
+
+  - id: samsung_tv
+    priority: 90
+    match:
+      name_regex: "(?i)\\[TV\\]|samsung|UE\\d{2}|Q\\d{2}\\s*Series|Tizen\\s*OS\\s*TV"
+    identify:
+      vendor: Samsung
+      family: Smart TV (BLE)
+      confidence: high
+
+  - id: samsung_appliance
+    priority: 86
+    match:
+      name_regex: "(?i)^(Washer|Fridge|Dryer|Oven|Dishwasher)$"
+      company_id_any: [0x0075, 0x75, 117]
+    identify:
+      vendor: Samsung
+      family: SmartThings appliance
+      confidence: high
+
+  - id: jbl_audio
+    priority: 85
+    match:
+      name_regex: "(?i)\\bJBL\\b"
+    identify:
+      vendor: Harman / JBL
+      family: Bluetooth audio
+      confidence: high
+
+  - id: shokz
+    priority: 85
+    match:
+      name_regex: "(?i)shokz|openswim|aeropex|openrun"
+    identify:
+      vendor: Shokz
+      family: Bone-conduction audio
+      confidence: high
+
+  - id: byd_ble
+    priority: 80
+    match:
+      name_regex: "(?i)^BYD\\b"
+    identify:
+      vendor: BYD
+      family: Automotive BLE key / accessory
+      confidence: medium
+
+  - id: apple_continuity
+    priority: 75
+    match:
+      company_id_any: [0x004C, 76]
+    identify:
+      vendor: Apple
+      family: Continuity / Find My / accessory
+      confidence: high
+
+  - id: google_fast_pair
+    priority: 75
+    match:
+      company_id_any: [0x00E0, 224]
+      service_uuid_contains_any: ["fe2c"]
+    identify:
+      vendor: Google
+      family: Fast Pair
+      confidence: high
+
+  - id: microsoft_cdp
+    priority: 70
+    match:
+      company_id_any: [0x0006, 6]
+    identify:
+      vendor: Microsoft
+      family: CDP / Swift Pair
+      confidence: medium
+
+  - id: nordic_semiconductor
+    priority: 40
+    match:
+      company_id_any: [0x0059, 89]
+    identify:
+      vendor: Nordic Semiconductor
+      family: nRF SoC OEM product
+      confidence: low
+
+  - id: espressif
+    priority: 45
+    match:
+      oui_vendor_regex: "(?i)espressif"
+    identify:
+      vendor: Espressif
+      family: ESP32 / ESP8266 IoT
+      confidence: medium
+
+  - id: xiaomi
+    priority: 80
+    match:
+      company_id_any: [0x038F, 911]
+      name_regex: "(?i)mi\\s|xiaomi|yeelight|mijia"
+    identify:
+      vendor: Xiaomi
+      family: Mi / Mijia BLE
+      confidence: high

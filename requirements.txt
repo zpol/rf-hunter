@@ -1,0 +1,13 @@
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pyyaml>=6.0
+pydantic>=2.0
+bleak>=0.21.0
+websockets>=12.0
+numpy>=1.26.0
+pyModeS>=2.17.0
+pillow>=10.0.0
+textual>=1.0.0
+rich>=13.0.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

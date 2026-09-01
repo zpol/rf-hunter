@@ -1,0 +1,233 @@
+# Wi-Fi technique catalog — assessment only (no exploit steps).
+# Predicates in applies_when match facts from wifi_assess.build_facts().
+
+techniques:
+  # ── Classic: open / WEP / WPA1 ─────────────────────────────────
+  - id: open_network
+    name: Open network (no encryption)
+    era: classic
+    category: auth
+    applies_when: [open]
+    severity: high
+    summary: Traffic is unencrypted at the link layer — eavesdropping and session hijack risk on the air.
+    client_impact: Credentials and sessions on HTTP/legacy apps may be exposed to nearby observers.
+    remediation: Enable WPA3-SAE (or WPA2-AES minimum); prefer OWE for open guest with encryption.
+    references: [IEEE 802.11 open system auth]
+    demo_note: Strong client demo — cleartext risk on open SSIDs.
+
+  - id: wep_crypto
+    name: WEP encryption
+    era: classic
+    category: crypto
+    applies_when: [wep]
+    severity: critical
+    summary: WEP is broken (IV reuse / RC4 attacks); keys are recoverable with modest traffic.
+    client_impact: Network confidentiality considered compromised if WEP is in use.
+    remediation: Migrate immediately to WPA2-AES or WPA3; retire WEP devices.
+    references: [FMS, PTW]
+
+  - id: wpa_tkip
+    name: WPA / TKIP legacy cipher
+    era: classic
+    category: crypto
+    applies_when: [wpa1_or_tkip]
+    severity: high
+    summary: WPA-TKIP is deprecated; MIC and related weaknesses remain relevant on aging gear.
+    client_impact: Weaker crypto than CCMP/GCMP; may enable downgrade or easier offline attacks.
+    remediation: Disable TKIP; require CCMP (AES) only; prefer WPA3.
+    references: [IEEE 802.11i, TKIP]
+
+  - id: wps_exposure
+    name: WPS enabled (PIN / push-button surface)
+    era: classic
+    category: auth
+    applies_when: [wps]
+    severity: high
+    summary: WPS expands the attack surface (PIN brute-force / implementation flaws on many APs).
+    client_impact: Unauthorized network join if WPS is reachable and poorly implemented.
+    remediation: Disable WPS on production APs; use strong PSK/SAE or 802.1X.
+    references: [WPS PIN, Pixie Dust class]
+    demo_note: Common finding on consumer routers.
+
+  # ── Classic / mid: handshake & availability classes ───────────
+  - id: psk_offline_class
+    name: PSK offline-crack exposure class
+    era: classic
+    category: crypto
+    applies_when: [psk]
+    severity: medium
+    summary: PSK networks allow offline dictionary attacks once a handshake/PMKID is obtained (lab/authorized only).
+    client_impact: Weak passphrases may be recovered offline; strong passphrases mitigate.
+    remediation: Long random PSK (≥20 chars) or move to WPA3-SAE / 802.1X EAP.
+    references: [WPA2-PSK, PMKID class]
+
+  - id: deauth_availability
+    name: Deauthentication / DoS availability risk
+    era: classic
+    category: protocol
+    applies_when: [any_infra]
+    severity: medium
+    summary: Management frames can disrupt associations when unprotected (no robust PMF).
+    client_impact: Clients may be knocked offline or forced to reauth (availability / lure risk).
+    remediation: Enable PMF (802.11w) required where clients support it; monitor for floods.
+    references: [802.11 deauth, 802.11w]
+    hardware: pineapple
+
+  - id: evil_twin_risk
+    name: Evil twin / rogue AP risk
+    era: classic
+    category: rogue
+    applies_when: [any_infra]
+    severity: medium
+    summary: Same/similar SSID can be spoofed; users may join a lookalike AP without mutual auth.
+    client_impact: Credential phishing / MitM if users connect to a rogue twin.
+    remediation: 802.1X with server cert validation; user education; detect rogue BSSIDs.
+    references: [Evil twin]
+    hardware: pineapple
+    demo_note: Narrative for client — detect + harden, not execute.
+
+  - id: karma_probe_risk
+    name: Probe-request / Karma-style client risk
+    era: classic
+    category: client
+    applies_when: [any_infra]
+    severity: low
+    summary: Client devices often probe for preferred networks, revealing SSIDs to nearby observers.
+    client_impact: Privacy leak of visited networks; can aid targeted rogue-AP lures.
+    remediation: Disable auto-join for unused SSIDs; use randomized MAC where available.
+    references: [Karma, probe requests]
+    hardware: pineapple
+
+  - id: hidden_ssid
+    name: Hidden SSID (security through obscurity)
+    era: classic
+    category: config
+    applies_when: [hidden_ssid]
+    severity: low
+    summary: Hiding the SSID does not prevent discovery and can break client behavior; not a control.
+    client_impact: False sense of security; clients may probe more aggressively.
+    remediation: Broadcast SSID; rely on strong crypto and access control instead.
+    references: [Hidden SSID]
+
+  # ── Modern: KRACK / Dragonblood / PMF / WPA3 ──────────────────
+  - id: krack_class
+    name: KRACK-class WPA2 handshake risk
+    era: modern
+    category: protocol
+    applies_when: [wpa2_family]
+    severity: medium
+    summary: WPA2 4-way handshake implementation flaws (KRACK class) affected many stacks historically.
+    client_impact: Depends on client/AP patch level; unpatched devices remain concerning.
+    remediation: Patch APs and clients; prefer WPA3; verify vendor advisories.
+    references: [CVE-2017-13077 family, KRACK]
+
+  - id: dragonblood_class
+    name: Dragonblood-class WPA3-SAE risk
+    era: modern
+    category: protocol
+    applies_when: [sae]
+    severity: medium
+    summary: Early WPA3-SAE implementations had timing/side-channel and downgrade-related issues.
+    client_impact: Depends on firmware age; transition mode increases downgrade risk.
+    remediation: Update firmware; prefer WPA3-only (disable transition) where clients allow.
+    references: [Dragonblood, WPA3-SAE]
+
+  - id: wpa3_transition
+    name: WPA2/WPA3 transition mode
+    era: modern
+    category: config
+    applies_when: [wpa3_transition]
+    severity: medium
+    summary: Transition mode keeps WPA2-PSK available — attackers may force downgrade to WPA2.
+    client_impact: Stronger SAE path may be bypassed if clients accept WPA2.
+    remediation: Move to WPA3-only when client fleet supports SAE.
+    references: [WPA3 transition mode]
+
+  - id: pmf_missing
+    name: Protected Management Frames (PMF) missing / unknown
+    era: modern
+    category: protocol
+    applies_when: [no_pmf]
+    severity: medium
+    summary: Without PMF, management frames remain spoofable (deauth/disassoc classes).
+    client_impact: Higher susceptibility to forced disconnects and related lure scenarios.
+    remediation: Enable PMF capable/required on enterprise and modern consumer APs.
+    references: [802.11w PMF]
+
+  - id: owe_opportunity
+    name: Open network without OWE
+    era: modern
+    category: crypto
+    applies_when: [open]
+    severity: medium
+    summary: Opportunistic Wireless Encryption (OWE) can encrypt open SSIDs without a password.
+    client_impact: Guests remain in cleartext if OWE is not offered.
+    remediation: Enable OWE (Enhanced Open) for guest SSIDs that must stay passwordless.
+    references: [RFC 8110 OWE]
+
+  - id: mixed_legacy
+    name: Mixed WPA/WPA2 legacy mode
+    era: modern
+    category: config
+    applies_when: [mixed_wpa]
+    severity: medium
+    summary: Advertising both WPA and WPA2 often reintroduces TKIP or weaker negotiation paths.
+    client_impact: Clients may negotiate weaker ciphers.
+    remediation: WPA2-AES-only or WPA3-only; remove WPA1.
+    references: [WPA mixed mode]
+
+  # ── Config / hygiene ──────────────────────────────────────────
+  - id: weak_vendor_default
+    name: Consumer AP vendor surface
+    era: classic
+    category: config
+    applies_when: [known_vendor]
+    severity: low
+    summary: Consumer vendors often ship with WPS-on, cloud mgmt, and default admin habits.
+    client_impact: Broader soft attack surface beyond air crypto (admin UI, cloud).
+    remediation: Change admin creds; disable remote admin/WPS; patch firmware.
+    references: [Vendor hygiene]
+
+  - id: wide_channel_crowd
+    name: Dense 2.4 GHz coexistence
+    era: classic
+    category: config
+    applies_when: [band_24]
+    severity: info
+    summary: 2.4 GHz is crowded; performance issues often mistaken for security incidents.
+    client_impact: Unstable links; harder RF troubleshooting during assessments.
+    remediation: Prefer 5/6 GHz for capacity; plan channels deliberately.
+    references: [2.4 GHz ISM]
+
+  - id: five_ghz_present
+    name: 5 GHz BSS observed
+    era: modern
+    category: config
+    applies_when: [band_5]
+    severity: info
+    summary: 5 GHz BSS present — generally better capacity; still needs correct crypto posture.
+    client_impact: Informational for inventory / dual-band hygiene.
+    remediation: Ensure both bands use the same strong security policy.
+    references: [5 GHz]
+
+  - id: he_wifi6
+    name: Wi-Fi 6 (HE) capabilities advertised
+    era: modern
+    category: protocol
+    applies_when: [he]
+    severity: info
+    summary: HE/Wi-Fi 6 features present — keep firmware current for protocol fixes.
+    client_impact: Informational; modern PHY does not replace auth/crypto hardening.
+    remediation: Keep AP firmware updated; enforce WPA3 where possible.
+    references: [802.11ax]
+
+  - id: assessment_baseline
+    name: Passive assessment baseline
+    era: modern
+    category: config
+    applies_when: [any_infra]
+    severity: info
+    summary: Passive scan facts recorded for this BSSID (SSID, security family, channel, vendor).
+    client_impact: Inventory baseline for the client report.
+    remediation: Re-scan after config changes; attach GPS/time for audit trail.
+    references: [RF Hunter wifi_assess]

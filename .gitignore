@@ -1,0 +1,64 @@
+# ── Captures & RF evidence (local lab only) ─────────────────────────────
+captures/*
+!captures/.gitkeep
+*.raw
+*.cu8
+*.cs8
+*.cfile
+*.iq
+*.bin
+*.wav
+*.pcap
+*.pcapng
+lock_signal*.bin
+tracker_state.json
+**/WD-*/
+**/DIVE-*/
+**/ATK-*/
+
+# ── Generated analysis / wardrive outputs ───────────────────────────────
+analysis_runs/
+results/
+reports/
+
+# ── Temp & scratch ──────────────────────────────────────────────────────
+tmp/
+tmp_fpv/
+*.tmp
+*.log
+
+# ── Unrelated local experiments (not part of RF Hunter) ───────────────────
+ender3s1_*
+
+# ── Python ────────────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────
+.cursor/
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Secrets & credentials ─────────────────────────────────────────────────
+.env
+.env.*
+*.pem
+*.key
+*.pat
+
+# ── OS / runtime ───────────────────────────────────────────────────────────
+*.pid
+wlan1

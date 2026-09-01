@@ -1,0 +1,25 @@
+services:
+  rf-hunter-v2:
+    build: .
+    container_name: rf-hunter-v2
+    network_mode: host
+    privileged: true
+    restart: unless-stopped
+    environment:
+      - RF_HUNTER_CAPTURES=/data/captures/rf-hunter-v2
+      - HACKRF_SERIAL=${HACKRF_SERIAL:-}
+      - RF_HUNTER_WIFI_IFACE=${RF_HUNTER_WIFI_IFACE:-wlan1}
+    volumes:
+      - ./captures:/data/captures/rf-hunter-v2
+      - ./frontend:/app/frontend
+      - ./backend:/app/backend
+      - /dev/bus/usb:/dev/bus/usb
+      - /var/run/dbus:/var/run/dbus
+      - /run/dbus:/run/dbus
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    group_add:
+      - bluetooth
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN

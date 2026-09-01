@@ -1,0 +1,450 @@
+categories:
+- id: automotive
+  label: Automotive
+  icon: car
+- id: access
+  label: Access & Remotes
+  icon: key
+- id: iot
+  label: IoT & Smart Home
+  icon: chip
+- id: industrial
+  label: Industrial / Telemetry
+  icon: factory
+- id: comms
+  label: Comms & AV
+  icon: radio
+- id: aviation
+  label: Aviation
+  icon: plane
+- id: maritime
+  label: Maritime
+  icon: ship
+device_types:
+- id: tpms_eu
+  name: TPMS EU (433.92 MHz)
+  category: automotive
+  description: Tire pressure sensors — EU band, ASK/FSK bursts on wheel motion
+  radio: hackrf
+  icon: tire
+  bands:
+  - freq_min_mhz: 428
+    freq_max_mhz: 438
+    bin_width_hz: 50000
+    center_mhz: 433.92
+  attack_profile: tpms_433
+  metadata:
+    modulation:
+    - ASK
+    - FSK
+    burst: true
+    standard: ISO 18000-6C variants
+    capability: decode
+  capability: decode
+- id: tpms_us
+  name: TPMS US (315 MHz)
+  category: automotive
+  description: TPMS and garage remotes — US ISM 315 MHz
+  radio: hackrf
+  icon: tire
+  bands:
+  - freq_min_mhz: 300
+    freq_max_mhz: 340
+    bin_width_hz: 100000
+    center_mhz: 315.0
+  attack_profile: tpms_315
+  metadata:
+    modulation:
+    - ASK
+    - FSK
+    burst: true
+    capability: decode
+  capability: decode
+- id: garage_433
+  name: Garage / Gate Remote 433 MHz
+  category: access
+  description: Fixed-code and rolling-code remotes EU ISM
+  radio: hackrf
+  icon: key
+  bands:
+  - freq_min_mhz: 420
+    freq_max_mhz: 450
+    bin_width_hz: 100000
+    center_mhz: 433.92
+  attack_profile: ism_433
+  metadata:
+    modulation:
+    - OOK
+    - ASK
+    protocols:
+    - rtl_433
+    - Nice
+    - CAME
+    - Hormann
+    capability: decode
+  capability: decode
+- id: garage_315
+  name: Remote 315 MHz (US)
+  category: access
+  description: US garage remotes and key fobs
+  radio: hackrf
+  icon: key
+  bands:
+  - freq_min_mhz: 310
+    freq_max_mhz: 320
+    bin_width_hz: 50000
+    center_mhz: 315.0
+  attack_profile: ism_315
+  capability: decode
+  metadata:
+    capability: decode
+- id: alarm_869
+  name: Wireless Alarm 869 MHz
+  category: access
+  description: ETSI EN 300 220 alarm band 869.25–869.40 MHz
+  radio: hackrf
+  icon: alarm
+  bands:
+  - freq_min_mhz: 865
+    freq_max_mhz: 872
+    bin_width_hz: 25000
+    center_mhz: 869.31
+  attack_profile: alarm_869
+  metadata:
+    standard: ETSI EN 300 220
+    channel_spacing_khz: 25
+    capability: decode
+  capability: decode
+- id: lora_eu868
+  name: LoRa / LoRaWAN EU868
+  category: iot
+  description: LoRa sensors and gateways — EU868 channels
+  radio: hackrf
+  icon: lora
+  bands:
+  - freq_min_mhz: 863
+    freq_max_mhz: 870
+    bin_width_hz: 50000
+    center_mhz: 868.3
+  - freq_min_mhz: 869
+    freq_max_mhz: 870.6
+    bin_width_hz: 25000
+    center_mhz: 869.525
+  attack_profile: lora_eu
+  metadata:
+    channels_mhz:
+    - 868.1
+    - 868.3
+    - 868.5
+    - 869.525
+    capability: presence
+  capability: presence
+- id: tuya_ble
+  name: Tuya / BLE IoT
+  category: iot
+  description: Tuya smart sensors, plugs — BLE provisioning (FD50/A201)
+  radio: ble
+  icon: plug
+  bands:
+  - ble_scan_seconds: 25
+  attack_profile: tuya_ble
+  metadata:
+    uuids:
+    - 0000fd50
+    - 0000a201
+    vendor: Tuya Smart
+    capability: ble
+  capability: ble
+- id: ble_sensors
+  name: BLE Sensors (generic)
+  category: iot
+  description: Temperature, humidity, door sensors — BLE GATT
+  radio: ble
+  icon: sensor
+  bands:
+  - ble_scan_seconds: 20
+  attack_profile: ble_generic
+  metadata:
+    services:
+    - '0x1809'
+    - '0x180F'
+    - '0x181A'
+    capability: ble
+  capability: ble
+- id: industrial_360
+  name: UHF Telemetry 360 MHz
+  category: industrial
+  description: Industrial telemetry / private PMR around 350–370 MHz — FM/FSK decode + rtl_433 + POCSAG if present
+  radio: hackrf
+  icon: factory
+  bands:
+  - freq_min_mhz: 350
+    freq_max_mhz: 370
+    bin_width_hz: 100000
+    center_mhz: 360.0
+  attack_profile: uhf_telemetry
+  capability: decode
+  metadata:
+    capability: decode
+    modulation:
+    - FM
+    - FSK
+    - AFSK
+    protocols:
+    - rtl_433
+    - POCSAG
+    - FLEX
+    - generic_fsk
+- id: ism_868_domotica
+  name: Domótica 868 MHz
+  category: iot
+  description: LoRa-adjacent, LightwaveRF, Eurodomo, heat meters
+  radio: hackrf
+  icon: home
+  bands:
+  - freq_min_mhz: 855
+    freq_max_mhz: 880
+    bin_width_hz: 100000
+    center_mhz: 868.0
+  attack_profile: ism_868
+  capability: decode
+  metadata:
+    capability: decode
+- id: pmr446
+  name: PMR446 / FRS
+  category: comms
+  description: Walkie-talkie 446 MHz (EU PMR446)
+  radio: hackrf
+  icon: walkie
+  bands:
+  - freq_min_mhz: 446
+    freq_max_mhz: 447
+    bin_width_hz: 25000
+    center_mhz: 446.0
+  attack_profile: fm_voice
+  capability: presence
+  metadata:
+    capability: presence
+- id: dect
+  name: DECT Phone
+  category: comms
+  description: Cordless phone base 1880 MHz
+  radio: hackrf
+  icon: phone
+  bands:
+  - freq_min_mhz: 1875
+    freq_max_mhz: 1885
+    bin_width_hz: 100000
+    center_mhz: 1880.0
+  attack_profile: dect
+  capability: presence
+  metadata:
+    capability: presence
+- id: lband_av
+  name: L-Band Wireless AV
+  category: comms
+  description: Wireless cameras, FPV, AV links 1.2–1.3 GHz
+  radio: hackrf
+  icon: fpv
+  bands:
+  - freq_min_mhz: 1220
+    freq_max_mhz: 1320
+    bin_width_hz: 200000
+    center_mhz: 1297.0
+  attack_profile: lband_video
+  capability: presence
+  metadata:
+    capability: presence
+- id: wifi_24
+  name: WiFi / Zigbee 2.4 GHz
+  category: iot
+  description: 2.4 GHz ISM — WiFi, Zigbee, BLE coexistence
+  radio: hackrf
+  icon: wifi
+  bands:
+  - freq_min_mhz: 2400
+    freq_max_mhz: 2483
+    bin_width_hz: 200000
+    center_mhz: 2437.0
+  attack_profile: ism_24
+  capability: presence
+  metadata:
+    capability: presence
+- id: full_spectrum
+  name: Full spectrum (HackRF 1–6000 MHz)
+  category: industrial
+  description: Full-range survey — chunked sweep across the entire HackRF RX band
+  radio: hackrf
+  icon: spectrum
+  bands: []
+  attack_profile: spectrum_survey
+  capability: presence
+  metadata:
+    capability: presence
+    hackrf_range_mhz: 1-6000
+- id: smart_tv_bt
+  name: Smart TV / Audio BT
+  category: comms
+  description: Samsung / Smart TV BLE — identity leak, GATT map, LAN remote API (:8001)
+  radio: ble
+  icon: tv
+  bands:
+  - ble_scan_seconds: 25
+  attack_profile: samsung_tv
+  capability: ble
+  metadata:
+    capability: ble
+    company_ids: [0x0075]
+    lab_focus: samsung_tv
+    control_hint: "LAN websocket :8001/:8002 + BLE identity"
+- id: telemetry_1690
+  name: Telemetry 1690 MHz
+  category: industrial
+  description: ISM telemetry band ~1690–1710 MHz
+  radio: hackrf
+  icon: antenna
+  bands:
+  - freq_min_mhz: 1690
+    freq_max_mhz: 1710
+    bin_width_hz: 100000
+    center_mhz: 1694.5
+  attack_profile: cw_telemetry
+  capability: presence
+  metadata:
+    capability: presence
+
+- id: adsb_1090
+  name: ADS-B Aircraft (1090 MHz)
+  category: aviation
+  description: Mode-S / ADS-B aircraft — callsign, position, altitude (PortaPack ADS-B RX)
+  radio: hackrf
+  icon: plane
+  bands:
+  - freq_min_mhz: 1085
+    freq_max_mhz: 1095
+    bin_width_hz: 100000
+    center_mhz: 1090.0
+  attack_profile: adsb_1090
+  capability: decode
+  metadata:
+    capability: decode
+    portapack: ADS-B
+    see_on_map: true
+- id: ais_marine
+  name: AIS Ships (162 MHz)
+  category: maritime
+  description: AIS Class A/B vessels — MMSI / position (PortaPack AIS Boats)
+  radio: hackrf
+  icon: ship
+  bands:
+  - freq_min_mhz: 161.9
+    freq_max_mhz: 162.1
+    bin_width_hz: 25000
+    center_mhz: 161.975
+  attack_profile: ais_marine
+  capability: presence
+  metadata:
+    capability: presence
+    portapack: AIS Boats
+    channels_mhz: [161.975, 162.025]
+    see_on_map: true
+- id: fpv_58
+  name: FPV Video 5.8 GHz
+  category: aviation
+  description: FPV drone video transmitters — PortaPack FPV Detect band
+  radio: hackrf
+  icon: drone
+  bands:
+  - freq_min_mhz: 5645
+    freq_max_mhz: 5945
+    bin_width_hz: 250000
+    center_mhz: 5800.0
+  attack_profile: fpv_58
+  capability: presence
+  metadata:
+    capability: presence
+    portapack: FPV Detect
+- id: aprs_vhf
+  name: APRS / Packet 144 MHz
+  category: comms
+  description: APRS position reports — EU 144.800 / US 144.390 (PortaPack APRS RX)
+  radio: hackrf
+  icon: aprs
+  bands:
+  - freq_min_mhz: 144.7
+    freq_max_mhz: 144.9
+    bin_width_hz: 25000
+    center_mhz: 144.8
+  attack_profile: aprs_vhf
+  capability: presence
+  metadata:
+    capability: presence
+    portapack: APRS RX
+- id: pocsag_pager
+  name: POCSAG / Pagers
+  category: industrial
+  description: POCSAG pager bursts — VHF/UHF (PortaPack POCSAG)
+  radio: hackrf
+  icon: pager
+  bands:
+  - freq_min_mhz: 169
+    freq_max_mhz: 174
+    bin_width_hz: 25000
+    center_mhz: 169.8
+  - freq_min_mhz: 466
+    freq_max_mhz: 470
+    bin_width_hz: 25000
+    center_mhz: 466.23
+  attack_profile: pocsag
+  capability: decode
+  metadata:
+    capability: decode
+    portapack: POCSAG
+- id: acars_vhf
+  name: ACARS VHF
+  category: aviation
+  description: Aircraft ACARS data link ~131.825 MHz (PortaPack ACARS) — spectrum presence only, not ADS-B position
+  radio: hackrf
+  icon: radio
+  bands:
+  - freq_min_mhz: 129
+    freq_max_mhz: 137
+    bin_width_hz: 50000
+    center_mhz: 131.825
+  attack_profile: acars_vhf
+  capability: presence
+  metadata:
+    capability: presence
+    portapack: ACARS
+- id: epirb_406
+  name: EPIRB / ELT 406 MHz
+  category: maritime
+  description: Distress beacons 406 MHz (PortaPack EPIRB)
+  radio: hackrf
+  icon: beacon
+  bands:
+  - freq_min_mhz: 405.5
+    freq_max_mhz: 406.5
+    bin_width_hz: 25000
+    center_mhz: 406.028
+  attack_profile: epirb_406
+  capability: presence
+  metadata:
+    capability: presence
+    portapack: EPIRB
+- id: weather_433
+  name: Weather / Sensors 433
+  category: iot
+  description: Oregon / ambient weather / ISM sensors (rtl_433 class)
+  radio: hackrf
+  icon: weather
+  bands:
+  - freq_min_mhz: 433
+    freq_max_mhz: 435
+    bin_width_hz: 50000
+    center_mhz: 433.92
+  attack_profile: weather_433
+  capability: decode
+  metadata:
+    capability: decode
+    portapack: Sensors

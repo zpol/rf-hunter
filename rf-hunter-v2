@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# RF Hunter — wardriving TUI (Textual)
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+export RF_HUNTER_CAPTURES="${RF_HUNTER_CAPTURES:-$ROOT/captures}"
+export RF_HUNTER_CATALOG="${RF_HUNTER_CATALOG:-$ROOT/backend/data/device_catalog.yaml}"
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+
+PY="${ROOT}/.venv/bin/python"
+if [[ ! -x "$PY" ]]; then
+  PY="${PYTHON:-python3}"
+fi
+
+exec "$PY" -m tui.app "$@"
