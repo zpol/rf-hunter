@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -43,24 +41,20 @@ from textual.widgets import (
 )
 from textual.widgets.selection_list import Selection
 
-from backend.app import catalog, deep_dive, monitor, scanner, tracker, vuln_scan
+from backend.app import catalog, deep_dive, monitor, radio, scanner, tracker, vuln_scan
 from backend.app.tracker import colored_bar, device_key, signal_level
 
 
 def hackrf_status() -> tuple[bool, str]:
-    if not shutil.which("hackrf_info"):
-        return False, "hackrf_info missing"
     try:
-        r = subprocess.run(["hackrf_info"], capture_output=True, timeout=5)
-        ok = r.returncode == 0 and b"Found HackRF" in r.stdout
-        if not ok:
-            return False, "not found"
-        serial = ""
-        for line in r.stdout.decode(errors="replace").splitlines():
-            if "Serial number:" in line:
-                serial = line.split(":", 1)[1].strip()[-12:]
-                break
-        return True, serial or "OK"
+        info = radio.status()
+        selected = info.get("selected")
+        if not selected:
+            return False, "no receiver found"
+        detail = selected.replace("_", "-").upper()
+        if selected == "rtl_sdr":
+            detail += f" device {info.get('rtl_device', '0')} · RX only"
+        return True, detail
     except Exception as e:
         return False, str(e)
 
@@ -148,9 +142,9 @@ class StatusBar(Static):
         tracked: int,
     ) -> None:
         h = (
-            f"[bold green]● HackRF[/] [dim]{hackrf_detail}[/]"
+            f"[bold green]● Receiver[/] [dim]{hackrf_detail}[/]"
             if hackrf_ok
-            else f"[bold red]○ HackRF[/] [dim]{hackrf_detail}[/]"
+            else f"[bold red]○ Receiver[/] [dim]{hackrf_detail}[/]"
         )
         color = {
             "idle": "dim",
@@ -219,7 +213,7 @@ class DetailPanel(Static):
 
 class RFHunterApp(App):
     TITLE = "RF Hunter v2"
-    SUB_TITLE = "wardrive · HackRF + BLE"
+    SUB_TITLE = "wardrive · SDR + BLE"
 
     CSS = """
     Screen {
@@ -410,7 +404,7 @@ class RFHunterApp(App):
         Binding("a", "select_all", "All", show=True),
         Binding("n", "clear_selection", "None", show=True),
         Binding("c", "clear_results", "Clear", show=True),
-        Binding("r", "refresh_hackrf", "HackRF", show=True),
+        Binding("r", "refresh_hackrf", "Receiver", show=True),
         Binding("f", "cycle_sev_filter", "Filter", show=True),
         Binding("enter", "focus_row", "Select", show=False),
     ]
@@ -589,7 +583,7 @@ class RFHunterApp(App):
         self._hackrf_detail = detail
         self._refresh_status_bar()
         self._log(
-            f"[green]HackRF OK[/] ({detail})" if ok else f"[red]HackRF N/A[/] ({detail})"
+            f"[green]Receiver OK[/] ({detail})" if ok else f"[red]Receiver N/A[/] ({detail})"
         )
 
     def action_select_all(self) -> None:

@@ -6,7 +6,7 @@
   <title>RF Hunter v2 — Wardrive</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css?v=52" />
+  <link rel="stylesheet" href="/static/css/style.css?v=56" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -26,7 +26,7 @@
         <button id="btn-rf-clone" class="btn btn-clone" type="button" title="RF remote clone lab">◈ RF CLONE</button>
         <span id="wifi-status" class="badge badge-muted">Wi‑Fi …</span>
         <span id="gps-status" class="badge badge-muted">GPS …</span>
-        <span id="hackrf-status" class="badge badge-muted">HackRF …</span>
+        <span id="hackrf-status" class="badge badge-muted">Receiver …</span>
         <span id="scan-status" class="badge badge-muted">Idle</span>
         <span id="vuln-status" class="badge badge-muted">Vulns idle</span>
         <span id="track-count" class="badge badge-muted">0 devices</span>
@@ -51,7 +51,15 @@
             <span>Full sweep</span>
           </label>
         </div>
-        <p class="hint" id="mode-hint">Wardrive loops selected bands. Full sweep = HackRF 1–6000 MHz.</p>
+        <p class="hint" id="mode-hint">Wardrive loops selected bands. Full sweep uses the selected receiver range.</p>
+        <label class="sweep-option hidden" id="full-sweep-options">
+          <input type="checkbox" id="exclude-fm-broadcast" />
+          <span><strong>Exclude FM broadcast</strong><small>Skip 87.5–108 MHz during Full Sweep</small></span>
+        </label>
+        <div class="scan-target-status" id="scan-target-status">
+          <span id="scan-target-summary">Scan targets: 0 device types selected</span>
+          <button type="button" id="btn-choose-types" class="btn-mini">Choose types ↓</button>
+        </div>
 
         <label class="field">
           <span>Duration / BLE window (s)</span>
@@ -112,7 +120,7 @@
         </div>
         <div id="vuln-counts" class="vuln-counts"></div>
 
-        <h2 class="section-title">Device types</h2>
+        <h2 class="section-title" id="device-types-heading">Device types</h2>
         <p class="hint">
           <span id="selected-count" class="selected-count">0 selected</span>
         </p>
@@ -151,7 +159,7 @@
             </select>
             <select id="filter-radio">
               <option value="">All radios</option>
-              <option value="hackrf">HackRF</option>
+              <option value="hackrf">RF / SDR</option>
               <option value="ble">BLE</option>
               <option value="wifi">Wi‑Fi</option>
               <option value="adsb">ADS-B</option>
@@ -351,9 +359,9 @@
       </header>
       <div class="confirm-body" id="replay-body"></div>
       <div class="confirm-actions replay-actions">
-        <button type="button" class="btn btn-ghost" data-replay-dismiss>Cerrar</button>
-        <button type="button" class="btn btn-deep" id="btn-replay-listen">🎧 Escuchar</button>
-        <button type="button" class="btn btn-attack" id="btn-replay-tx" disabled>▶ Replicar TX</button>
+        <button type="button" class="btn btn-ghost" data-replay-dismiss>Close</button>
+        <button type="button" class="btn btn-deep" id="btn-replay-listen">🎧 Listen</button>
+        <button type="button" class="btn btn-attack" id="btn-replay-tx" disabled>▶ Replay TX</button>
       </div>
     </div>
   </div>
@@ -447,6 +455,6 @@
     </div>
   </div>
 
-  <script src="/static/js/app.js?v=66"></script>
+    <script src="/static/js/app.js?v=73"></script>
 </body>
 </html>

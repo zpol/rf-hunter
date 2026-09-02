@@ -13,12 +13,30 @@ from typing import Any
 import numpy as np
 
 from .models import DetectedDevice
+from . import radio as radio_mod
 
 SAMPLE_RATE = 2_000_000
 FREQ_HZ = 1_090_000_000
 # Process IQ in short chunks to keep RAM + stop responsive
 CHUNK_S = 0.5
 HACKRF_SERIAL = os.environ.get("HACKRF_SERIAL", "").strip()
+
+
+def is_adsb_target(device: dict[str, Any] | None) -> bool:
+    """Recognize catalog ADS-B entries and full-sweep peaks hinted as ADS-B."""
+    if not device:
+        return False
+    meta = device.get("metadata") or {}
+    hint = meta.get("catalog_hint") or {}
+    identifiers = {
+        str(device.get("device_type_id") or "").lower(),
+        str(meta.get("attack_profile") or "").lower(),
+        str(hint.get("device_type_id") or "").lower(),
+        str(hint.get("attack_profile") or "").lower(),
+    }
+    if "adsb_1090" in identifiers:
+        return True
+    return str(device.get("radio") or "").lower() == "adsb"
 
 
 def _mag_from_iq_sc8(raw: bytes) -> np.ndarray:
@@ -42,41 +60,13 @@ def _capture_iq(
     stop: threading.Event | None = None,
 ) -> bool:
     n_samples = int(SAMPLE_RATE * max(0.2, duration_s))
-    cmd = [
-        "hackrf_transfer",
-        "-r", path,
-        "-f", str(FREQ_HZ),
-        "-s", str(SAMPLE_RATE),
-        "-n", str(n_samples),
-        "-l", str(int(lna_db)),
-        "-g", str(int(vga_db)),
-        "-a", "0",
-    ]
-    if HACKRF_SERIAL:
-        cmd = ["hackrf_transfer", "-d", HACKRF_SERIAL] + cmd[1:]
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            preexec_fn=os.setsid,
+        capture = radio_mod.capture_iq(
+            path, freq_hz=FREQ_HZ, sample_rate=SAMPLE_RATE,
+            num_samples=n_samples, lna_db=lna_db, vga_db=vga_db,
+            timeout=duration_s + 3.0, stop_event=stop,
         )
-        deadline = time.time() + duration_s + 3.0
-        while proc.poll() is None:
-            if stop and stop.is_set():
-                try:
-                    os.killpg(proc.pid, 15)
-                except Exception:
-                    proc.kill()
-                return False
-            if time.time() > deadline:
-                try:
-                    os.killpg(proc.pid, 15)
-                except Exception:
-                    proc.kill()
-                break
-            time.sleep(0.05)
-        return os.path.exists(path) and os.path.getsize(path) > 10_000
+        return capture.ok and os.path.exists(path) and os.path.getsize(path) > 10_000
     except Exception:
         return False
 

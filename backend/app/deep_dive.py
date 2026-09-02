@@ -13,6 +13,7 @@ import numpy as np
 from . import risk as risk_mod
 from . import tpms_decode
 from . import tracker as tracker_mod
+from . import radio as radio_mod
 
 _DEFAULT_CAPTURES = Path(__file__).resolve().parents[2].parent / "captures" / "rf-hunter-v2"
 CAPTURES = Path(os.environ.get("RF_HUNTER_CAPTURES", str(_DEFAULT_CAPTURES)))
@@ -38,13 +39,55 @@ def deep_dive(device: dict[str, Any]) -> dict[str, Any]:
 
     if radio == "ble" and device.get("mac"):
         result["analysis"]["ble"] = _ble_deep_dive(device["mac"], out_dir)
-    elif radio == "hackrf" and device.get("freq_mhz"):
+    elif device.get("freq_mhz"):
+        from . import adsb_decode
         from . import fpv_decode
 
+        is_adsb = adsb_decode.is_adsb_target(device)
         is_tpms = tpms_decode.is_tpms_target(device)
         is_fpv = fpv_decode.is_fpv_target(device)
         with exclusive("deep_dive"):
-            if is_fpv:
+            if is_adsb:
+                from . import gps as gps_mod
+
+                fix = gps_mod.gps.current() or {}
+                aircraft = adsb_decode.listen(
+                    duration_s=20.0,
+                    lna_db=40,
+                    vga_db=44,
+                    lat_ref=fix.get("lat"),
+                    lon_ref=fix.get("lon"),
+                    device_type={
+                        "id": "adsb_1090",
+                        "name": "ADS-B Aircraft (1090 MHz)",
+                        "attack_profile": "adsb_1090",
+                        "metadata": {"capability": "decode", "portapack": "ADS-B"},
+                    },
+                )
+                for aircraft_device in aircraft:
+                    tracker_mod.tracker.upsert(aircraft_device)
+                result["analysis"]["adsb"] = {
+                    "ok": bool(aircraft),
+                    "aircraft_count": len(aircraft),
+                    "message": (
+                        f"Decoded {len(aircraft)} aircraft"
+                        if aircraft
+                        else "No valid ADS-B frames decoded during the 20 second listen"
+                    ),
+                    "aircraft": aircraft,
+                }
+                key = tracker_mod.device_key(device)
+                entry = tracker_mod.tracker.get(key)
+                if entry is not None:
+                    entry_meta = dict(entry.get("metadata") or {})
+                    entry_meta["adsb_decode"] = {
+                        "ok": bool(aircraft),
+                        "aircraft_count": len(aircraft),
+                        "message": result["analysis"]["adsb"]["message"],
+                        "dive_id": dive_id,
+                    }
+                    tracker_mod.tracker.patch(key, {"metadata": entry_meta})
+            elif is_fpv:
                 # Wideband IQ for FM video (not the 2 Msps ISM path)
                 fpv = fpv_decode.listen_and_decode(
                     float(device["freq_mhz"]),
@@ -113,7 +156,7 @@ def deep_dive(device: dict[str, Any]) -> dict[str, Any]:
                     out_dir,
                     duration_s=20 if is_tpms else 15,
                 )
-        if is_fpv:
+        if is_adsb or is_fpv:
             pass
         elif is_tpms and result["analysis"].get("rf", {}).get("iq_file"):
             iq_path = out_dir / result["analysis"]["rf"]["iq_file"]
@@ -232,23 +275,21 @@ def _rf_deep_dive(freq_mhz: float, out_dir: Path, duration_s: int = 15) -> dict[
     samples = rate * duration_s
     freq_hz = int(freq_mhz * 1e6)
 
-    cmd = [
-        "hackrf_transfer", "-r", str(iq_path),
-        "-f", str(freq_hz), "-s", str(rate),
-        "-l", "40", "-g", "44", "-a", "0", "-b", "1750000",
-        "-n", str(samples),
-    ]
-    if HACKRF_SERIAL:
-        cmd[1:1] = ["-d", HACKRF_SERIAL]
-
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=duration_s + 30)
+    capture = radio_mod.capture_iq(
+        iq_path, freq_hz=freq_hz, sample_rate=rate, num_samples=samples,
+        lna_db=40, vga_db=44, bandwidth_hz=1_750_000,
+        timeout=duration_s + 30,
+    )
     analysis: dict[str, Any] = {
         "freq_mhz": freq_mhz,
         "iq_file": iq_path.name,
-        "hackrf_exit": proc.returncode,
-        "stderr_tail": (proc.stderr or "")[-500:],
+        "radio_backend": capture.backend,
+        "hackrf_exit": capture.returncode,
+        "stderr_tail": capture.stderr[-500:],
         "duration_s_request": duration_s,
     }
+    if capture.error:
+        analysis["error"] = capture.error
 
     if iq_path.exists() and iq_path.stat().st_size > 1000:
         analysis.update(_analyze_iq(iq_path, rate))

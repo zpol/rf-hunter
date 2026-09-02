@@ -25,6 +25,8 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html, body { height: 100%; }
+
 body {
   font-family: var(--font);
   background:
@@ -36,10 +38,11 @@ body {
   line-height: 1.5;
 }
 
-.app { display: flex; flex-direction: column; min-height: 100vh; }
+.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
 .header {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   padding: 1rem 1.5rem;
@@ -77,6 +80,7 @@ body {
   gap: 0;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .wardrive-map {
@@ -396,6 +400,27 @@ body {
   overflow-y: auto;
 }
 .panel-detail { border-right: none; }
+.panel-config,
+.panel-detail { height: 100%; overflow-y: auto; }
+.panel-results {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.panel-results > .view-tabs { flex: 0 0 auto; }
+.panel-results > .view-pane:not(.hidden) {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+.panel-results > #view-devices:not(.hidden) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
 .panel h2 {
   font-size: 0.8rem;
@@ -431,6 +456,21 @@ body {
   color: var(--wardrive);
 }
 .mode-opt input { accent-color: var(--wardrive); }
+.sweep-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: -0.2rem 0 0.85rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(59, 158, 255, 0.06);
+  cursor: pointer;
+}
+.sweep-option.hidden { display: none; }
+.sweep-option input { margin-top: 0.15rem; accent-color: var(--wardrive); }
+.sweep-option span { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.72rem; }
+.sweep-option small { color: var(--text-muted); font-size: 0.66rem; }
 
 .field { display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 0.85rem; }
 .field span { font-size: 0.75rem; color: var(--text-muted); }
@@ -449,6 +489,23 @@ body {
 
 .hint { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.75rem; }
 .selected-count { color: var(--accent); font-weight: 600; font-family: var(--mono); }
+.scan-target-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: -0.25rem 0 0.9rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(59, 158, 255, 0.06);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+}
+.scan-target-status.ready { border-color: rgba(61, 214, 140, 0.35); color: var(--success); }
+.scan-target-status.missing { border-color: rgba(240, 180, 41, 0.45); color: var(--warning); }
+.scan-target-status .btn-mini { flex: 0 0 auto; }
 
 .btn-ghost {
   width: 100%;
@@ -795,6 +852,12 @@ body {
 }
 .device-card:hover { background: var(--bg-card-hover); }
 .device-card.selected { border-color: var(--accent); background: var(--bg-card-active); }
+.device-card.disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  filter: grayscale(0.65);
+}
+.device-card.disabled:hover { background: var(--bg-card); }
 
 .device-card .check {
   width: 18px; height: 18px;
@@ -1020,7 +1083,16 @@ body {
   color: var(--accent);
 }
 
-.results-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  overscroll-behavior: contain;
+}
 .results-list.device-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
@@ -1036,7 +1108,7 @@ body {
 .results-list.device-table {
   display: block;
   overflow: auto;
-  max-height: calc(100vh - 220px);
+  max-height: none;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: #0d1219;
@@ -2072,8 +2144,15 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 1100px) {
+  html, body { height: auto; }
+  .app { height: auto; min-height: 100vh; overflow: visible; }
   .layout-v2 { grid-template-columns: 1fr; }
+  .layout-v2 { overflow: visible; }
   .panel { border-right: none; border-bottom: 1px solid var(--border); }
+  .panel-config, .panel-detail, .panel-results { height: auto; overflow: visible; }
+  .panel-results > .view-pane:not(.hidden),
+  .panel-results > #view-devices:not(.hidden),
+  .results-list { overflow: visible; }
   .filters { grid-template-columns: 1fr 1fr; }
   .dash-grid { grid-template-columns: 1fr; }
   .live-row {

@@ -46,7 +46,7 @@ def pkill_rf_tools() -> list[str]:
     started by this lab stack. Returns names that were signalled.
     """
     killed: list[str] = []
-    for name in ("hackrf_sweep", "hackrf_transfer", "rtl_433"):
+    for name in ("hackrf_sweep", "hackrf_transfer", "rtl_sdr", "rtl_power", "rtl_fm", "rtl_adsb", "rtl_433"):
         try:
             r = subprocess.run(
                 ["pkill", "-TERM", "-x", name],

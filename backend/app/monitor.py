@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import csv
 import os
 import subprocess
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
 from . import tracker as tracker_mod
+from . import radio as radio_mod
 from .procutil import kill_process_tree, pkill_rf_tools
 
 HACKRF_SERIAL = os.environ.get("HACKRF_SERIAL", "")
@@ -29,12 +30,12 @@ def _hint(db: float, baseline: float | None) -> str:
         return "baseline…"
     delta = db - baseline
     if delta >= 8:
-        return ">>> MUY CERCA"
+        return ">>> VERY CLOSE"
     if delta >= 3:
-        return ">> cerca / mas fuerte"
+        return ">> closer / stronger"
     if delta <= -5:
-        return "<< alejandose"
-    return "~ estable"
+        return "<< moving away"
+    return "~ steady"
 
 
 def sweep_peak(
@@ -43,75 +44,35 @@ def sweep_peak(
     sweeps: int = 4,
     stop_event: threading.Event | None = None,
 ) -> float | None:
-    """Peak dB near center_mhz via hackrf_sweep (stdout parse). Interruptible."""
-    f_lo = int(center_mhz - span_mhz / 2)
-    f_hi = int(center_mhz + span_mhz / 2) + 1
-    cmd = [
-        "hackrf_sweep",
-        "-f", f"{f_lo}:{f_hi}",
-        "-a", "1",
-        "-p", "1",
-        "-l", "32",
-        "-g", "40",
-        "-w", "25000",
-        "-N", str(sweeps),
-    ]
-    if HACKRF_SERIAL:
-        cmd = ["hackrf_sweep", "-d", HACKRF_SERIAL] + cmd[1:]
+    """Peak dBFS near center via normalized IQ from either receiver."""
     try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            preexec_fn=os.setsid,
-        )
-    except Exception:
-        return None
+        import numpy as np
 
-    chunks: list[str] = []
-    deadline = time.time() + 20
-    try:
-        while proc.poll() is None:
-            if stop_event is not None and stop_event.is_set():
-                kill_process_tree(proc, grace_s=0.2)
+        rate = 2_000_000
+        sample_count = max(131_072, int(sweeps) * 65_536)
+        with tempfile.TemporaryDirectory(prefix="rf-hunter-monitor-") as tmp:
+            path = os.path.join(tmp, "monitor.cs8")
+            capture = radio_mod.capture_iq(
+                path, freq_hz=int(center_mhz * 1e6), sample_rate=rate,
+                num_samples=sample_count, lna_db=32, vga_db=40,
+                timeout=8, stop_event=stop_event,
+            )
+            if not capture.ok:
                 return None
-            if time.time() > deadline:
-                kill_process_tree(proc, grace_s=0.2)
-                break
-            time.sleep(0.05)
-        if proc.stdout is not None:
-            try:
-                out, _ = proc.communicate(timeout=1)
-                if out:
-                    chunks.append(out)
-            except Exception:
-                kill_process_tree(proc, grace_s=0.1)
+            raw = np.fromfile(path, dtype=np.int8)
     except Exception:
-        kill_process_tree(proc, grace_s=0.2)
         return None
-
-    stdout = "".join(chunks)
-    if not stdout:
+    raw = raw[: raw.size // 2 * 2]
+    if raw.size < 4096:
         return None
-
-    best = -999.0
-    for row in csv.reader(stdout.splitlines()):
-        if len(row) < 7:
-            continue
-        try:
-            hz_low = float(row[2])
-            bin_w = float(row[4])
-            dbs = [float(x) for x in row[6:]]
-        except ValueError:
-            continue
-        for i, db in enumerate(dbs):
-            if not (-120.0 < db < 0.0):
-                continue
-            f = (hz_low + i * bin_w) / 1e6
-            if abs(f - center_mhz) <= span_mhz / 2 and db > best:
-                best = db
-    return best if best > -900 else None
+    z = (raw[0::2].astype(np.float32) + 1j * raw[1::2].astype(np.float32)) / 128.0
+    n = min(z.size, 262_144)
+    spectrum = np.abs(np.fft.fftshift(np.fft.fft(z[:n] * np.hanning(n)))) / n
+    freqs = np.fft.fftshift(np.fft.fftfreq(n, 1.0 / rate))
+    mask = np.abs(freqs) <= span_mhz * 500_000.0
+    if not np.any(mask):
+        return None
+    return float(20.0 * np.log10(float(np.max(spectrum[mask])) + 1e-12))
 
 
 class MonitorSession:
@@ -221,7 +182,7 @@ class MonitorSession:
                     "db": None,
                     "level": 0,
                     "bar": "[............................]",
-                    "hint": "sin pico",
+                    "hint": "no peak",
                     "utc": datetime.now(timezone.utc).isoformat(),
                 })
             # brief pause between samples

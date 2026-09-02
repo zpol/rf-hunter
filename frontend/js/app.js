@@ -30,6 +30,7 @@
   let scopeToLastScan = true;
   let wifiAps = [];
   let wifiStatus = null;
+  let receiverStatus = null;
   /** When false, ignore Wi‑Fi AP pushes (WS + health poll) until user/start resumes. */
   let wifiLiveEnabled = true;
   let map = null;
@@ -89,6 +90,9 @@
     count: $("#detection-count"),
     trackCount: $("#track-count"),
     selectedCount: $("#selected-count"),
+    scanTargetStatus: $("#scan-target-status"),
+    scanTargetSummary: $("#scan-target-summary"),
+    btnChooseTypes: $("#btn-choose-types"),
     btnSelectAll: $("#btn-select-all"),
     btnSelectWow: $("#btn-select-wow"),
     btnSelectLabTvs: $("#btn-select-lab-tvs"),
@@ -116,6 +120,8 @@
     scanStatus: $("#scan-status"),
     vulnStatus: $("#vuln-status"),
     btnScan: $("#btn-scan"),
+    fullSweepOptions: $("#full-sweep-options"),
+    excludeFmBroadcast: $("#exclude-fm-broadcast"),
     btnStop: $("#btn-stop"),
     btnCleanup: $("#btn-cleanup"),
     confirmModal: $("#confirm-modal"),
@@ -367,6 +373,40 @@
     return `<span class="${cls} mono-ico" aria-hidden="true">${typeGlyph(idOrObj)}</span>`;
   }
 
+  function receiverLabel(d) {
+    const radio = String(d?.radio || "").toLowerCase();
+    if (radio === "ble") return "BLE";
+    if (radio === "wifi") return "WI-FI";
+    if (radio === "adsb") return "ADS-B";
+    if (radio === "ais") return "AIS";
+    const backend = String((d?.metadata || {}).receiver_backend || receiverStatus?.selected || "").toLowerCase();
+    if (backend === "rtl_sdr") return "RTL-SDR";
+    if (backend === "hackrf") return "HACKRF";
+    return radio ? radio.toUpperCase() : "RF / SDR";
+  }
+
+  function receiverRangeText() {
+    const range = receiverStatus?.frequency_range_mhz;
+    return Array.isArray(range) && range.length === 2
+      ? `${Number(range[0])}–${Number(range[1])} MHz`
+      : "the selected receiver range";
+  }
+
+  function receiverAwareText(value) {
+    let text = value == null ? "" : String(value);
+    if (receiverStatus?.selected === "rtl_sdr" && /full spectrum/i.test(text)) {
+      const range = receiverStatus.frequency_range_mhz;
+      const rangeText = Array.isArray(range) ? `${Number(range[0])}–${Number(range[1])} MHz` : "receiver range";
+      text = text.replace(/HackRF\s*1\s*[–-]\s*6000\s*MHz/gi, `RTL-SDR ${rangeText}`);
+      text = text.replace(/HackRF/gi, "RTL-SDR");
+    }
+    return text;
+  }
+
+  function deviceDisplayName(d) {
+    return receiverAwareText(d?.name || d?.device_type_name || "?");
+  }
+
   function log(msg) {
     els.log.textContent += msg + "\n";
     els.log.scrollTop = els.log.scrollHeight;
@@ -398,18 +438,23 @@
         (device.metadata || {}).attack_profile === "tpms_315" ||
         (device.metadata || {}).attack_profile === "tpms_433");
     const isFpv = isFpvDevice(device);
+    const isAdsb = isAdsbDevice(device);
     showModal(
-      isFpv ? "FPV decode" : isTpms ? "TPMS deep dive" : "Deep dive",
+      isAdsb ? "ADS-B decode" : isFpv ? "FPV decode" : isTpms ? "TPMS deep dive" : "Deep dive",
       `<div class="dive-loading"><div class="spinner"></div>
         <p>${
-          isFpv
+          isAdsb
+            ? "Listening at 1090 MHz and decoding Mode-S / ADS-B frames…"
+            : isFpv
             ? "Capturing wideband IQ + FM video demod…"
             : isTpms
               ? "Capturing IQ + decoding TPMS frames…"
               : "Capturing & analysing signal…"
         }</p>
         <p class="hint">${
-          isFpv
+          isAdsb
+            ? "~20s listen — aircraft appear as separate decoded tracker entries"
+            : isFpv
             ? "~0.6s @ 10 Msps — needs an active analog VTX (NTSC/PAL)"
             : isTpms
               ? "Move/spin the tire or wait for sensor TX (~20s listen)"
@@ -418,6 +463,19 @@
       { html: true, subtitle: isFpv && device?.freq_mhz != null ? `${Number(device.freq_mhz).toFixed(3)} MHz` : "Please wait" }
     );
     els.modalToggleRaw.classList.add("hidden");
+  }
+
+  function isAdsbDevice(d) {
+    if (!d) return false;
+    const meta = d.metadata || {};
+    const hint = meta.catalog_hint || {};
+    return (
+      String(d.radio || "").toLowerCase() === "adsb" ||
+      String(d.device_type_id || "").toLowerCase() === "adsb_1090" ||
+      String(meta.attack_profile || "").toLowerCase() === "adsb_1090" ||
+      String(hint.device_type_id || "").toLowerCase() === "adsb_1090" ||
+      String(hint.attack_profile || "").toLowerCase() === "adsb_1090"
+    );
   }
 
   function isFpvDevice(d) {
@@ -450,7 +508,8 @@
   async function runFpvOrDive(d) {
     if (!d) return;
     const fpv = isFpvDevice(d);
-    log((fpv ? "FPV decode " : "Deep dive ") + (d.key || d.freq_mhz || "") + "…");
+    const adsb = isAdsbDevice(d);
+    log((adsb ? "ADS-B decode " : fpv ? "FPV decode " : "Deep dive ") + (d.key || d.freq_mhz || "") + "…");
     showDiveLoading(d);
     try {
       const res = await api("/api/deep-dive", {
@@ -460,7 +519,10 @@
       showDiveReport(res);
       const risk = res.risk || {};
       const frames = (res.analysis?.fpv?.frames || []).length;
-      if (fpv) {
+      if (adsb) {
+        const decoded = res.analysis?.adsb || {};
+        log(decoded.ok ? `ADS-B decode ok — ${decoded.aircraft_count || 0} aircraft` : `ADS-B decode — ${decoded.message || "no frames"}`);
+      } else if (fpv) {
         log(
           res.analysis?.fpv?.ok
             ? `FPV decode ok — ${frames} frame(s)`
@@ -473,8 +535,8 @@
       setDevices(snap.devices || []);
       if (focusedKey && devicesByKey[focusedKey]) renderFocus(devicesByKey[focusedKey]);
     } catch (e) {
-      showModal(fpv ? "FPV decode error" : "Deep dive error", String(e));
-      log((fpv ? "FPV" : "Dive") + " ERROR: " + e);
+      showModal(adsb ? "ADS-B decode error" : fpv ? "FPV decode error" : "Deep dive error", String(e));
+      log((adsb ? "ADS-B" : fpv ? "FPV" : "Dive") + " ERROR: " + e);
     }
   }
 
@@ -793,7 +855,7 @@
       ${
         can
           ? `<div class="dive-listen-actions">
-               <button type="button" class="btn btn-deep" id="btn-dive-listen-live">🎧 Escuchar en vivo (~8s)</button>
+               <button type="button" class="btn btn-deep" id="btn-dive-listen-live">🎧 Listen live (~8s)</button>
              </div>
              <div id="dive-listen-status" class="hint"></div>
              <div id="dive-listen-live-player"></div>`
@@ -810,8 +872,8 @@
     btn.onclick = async () => {
       btn.disabled = true;
       const prev = btn.textContent;
-      btn.textContent = "Capturando…";
-      if (status) status.textContent = "HackRF RX + FM demod (wardrive se pausa)…";
+      btn.textContent = "Capturing…";
+      if (status) status.textContent = `${receiverLabel(target)} RX + FM demod (wardrive pauses)…`;
       try {
         const out = await api("/api/listen/audio", {
           method: "POST",
@@ -821,7 +883,7 @@
           if (status) status.textContent = out.error || "Listen failed";
           return;
         }
-        if (status) status.textContent = out.hint || "Listo — dale al play.";
+        if (status) status.textContent = out.hint || "Ready — press play.";
         if (player && out.wav_url) {
           player.innerHTML = `<audio class="dive-audio" controls autoplay preload="auto" src="${escapeHtml(
             out.wav_url
@@ -964,11 +1026,12 @@
     const ble = res.analysis?.ble || null;
     const tpms = res.analysis?.tpms || null;
     const fpv = res.analysis?.fpv || null;
+    const adsbDive = res.analysis?.adsb || null;
     const risk = enrichRiskFromBle(res.risk || {}, ble);
     const sev = sevClass(risk.severity || risk.status || target.risk_status);
     const isBle = (target.radio || "").toLowerCase() === "ble" || !!ble;
     const name =
-      target.name || target.device_type_name || target.mac || (target.freq_mhz ? `${target.freq_mhz} MHz` : "Target");
+      deviceDisplayName(target) || target.mac || (target.freq_mhz ? `${target.freq_mhz} MHz` : "Target");
     const loc = target.mac || (target.freq_mhz != null ? `${target.freq_mhz} MHz` : "—");
 
     const tpms0 = (tpms?.sensors || [])[0];
@@ -1035,10 +1098,24 @@
       </div>`;
     }
 
+    const adsbHtml = adsbDive
+      ? `<div class="dive-section"><h4>${ICONS.plane || ICONS.rf} ADS-B decode</h4>
+          <p class="hint">${escapeHtml(adsbDive.message || "")}</p>
+          <div class="findings-list">${(adsbDive.aircraft || [])
+            .slice(0, 20)
+            .map((a) => {
+              const ad = (a.metadata || {}).adsb || {};
+              return `<div class="finding"><div><div class="finding-title">${escapeHtml(a.name || ad.callsign || `ICAO ${ad.icao || "—"}`)}</div>
+                <div class="finding-detail">ICAO ${escapeHtml(ad.icao || "—")}${ad.alt_ft != null ? ` · ${escapeHtml(Math.round(ad.alt_ft))} ft` : ""}${ad.speed_kts != null ? ` · ${escapeHtml(Math.round(ad.speed_kts))} kt` : ""}${ad.messages != null ? ` · ${escapeHtml(ad.messages)} msg(s)` : ""}</div></div></div>`;
+            })
+            .join("") || '<div class="hint">Try again while aircraft are in range.</div>'}</div>
+        </div>`
+      : "";
+
     const metaRows = [
       ["Dive ID", res.dive_id],
       ["Key", target.key],
-      ["Radio", (target.radio || "").toUpperCase()],
+      ["Radio", receiverLabel(target)],
       ["Profile", risk.profile || (target.metadata || {}).attack_profile],
       ["Peak offset", rf ? fmtHz(rf.peak_offset_hz) : null],
       ["Mean power", rf?.mean_dbfs != null ? `${fmtNum(rf.mean_dbfs, 1)} dBFS` : null],
@@ -1054,7 +1131,7 @@
             <div class="dive-icon ${isBle ? "ble" : ""}">${isBle ? ICONS.ble : ICONS.rf}</div>
             <div>
               <div class="dive-title">${escapeHtml(name)}</div>
-              <div class="dive-meta">${escapeHtml(loc)} · ${escapeHtml(target.device_type_name || target.device_type_id || "")}</div>
+              <div class="dive-meta">${escapeHtml(loc)} · ${escapeHtml(receiverAwareText(target.device_type_name || target.device_type_id || ""))}</div>
             </div>
           </div>
           <span class="dive-sev risk-pill risk-${escapeHtml(sev)}">${escapeHtml(sev)}</span>
@@ -1073,6 +1150,7 @@
         </div>
 
         ${renderTpms(tpms)}
+        ${adsbHtml}
         ${fpvHtml}
         ${renderUhfListen(res)}
         <div class="dive-section">
@@ -1092,7 +1170,7 @@
         </div>
       </div>`;
 
-    showModal("Deep dive report", html, {
+    showModal(adsbDive ? "ADS-B decode report" : "Deep dive report", html, {
       html: true,
       subtitle: res.dive_id || "",
       raw: res,
@@ -1121,7 +1199,7 @@
 
   function scanButtonLabel(mode) {
     if (mode === "wardrive") return "▶ Start wardrive";
-    if (mode === "full_sweep") return "▶ Full sweep 1–6 GHz";
+    if (mode === "full_sweep") return "▶ Full receiver sweep";
     return "▶ Start scan";
   }
 
@@ -1129,13 +1207,15 @@
     const hint = $("#mode-hint");
     if (!hint) return;
     const mode = selectedMode();
+    if (els.fullSweepOptions) {
+      els.fullSweepOptions.classList.toggle("hidden", mode !== "full_sweep");
+    }
     if (mode === "full_sweep") {
-      hint.textContent =
-        "Full sweep: HackRF 1→6000 MHz in 100 MHz chunks (~2–6 sweeps each). Slow; no type selection needed.";
+      hint.textContent = `Full sweep: ${receiverRangeText()} in ~100 MHz chunks. Slow; no type selection needed.`;
     } else if (mode === "once") {
       hint.textContent = "Once: single pass over selected device types.";
     } else {
-      hint.textContent = "Wardrive loops selected bands. Full sweep = HackRF 1–6000 MHz.";
+      hint.textContent = `Wardrive loops selected bands. Full sweep uses ${receiverRangeText()}.`;
     }
   }
 
@@ -1193,7 +1273,7 @@
   }
 
   function deviceFamily(d) {
-    return d.family || ((d.metadata || {}).fingerprint || {}).family || "";
+    return receiverAwareText(d.family || ((d.metadata || {}).fingerprint || {}).family || "");
   }
 
   function sparkHtml(hist) {
@@ -1233,6 +1313,17 @@
     els.selectedCount.textContent = text;
     els.selectedCount.title = [...selected].sort().join(", ") || "None";
     els.btnSelectAll.classList.toggle("hidden", activeCategory === "all");
+    const fullSweep = selectedMode() === "full_sweep";
+    if (els.scanTargetSummary) {
+      els.scanTargetSummary.textContent = fullSweep
+        ? `Scan target: full ${receiverRangeText()}`
+        : `Scan targets: ${n} device type${n === 1 ? "" : "s"} selected`;
+    }
+    if (els.scanTargetStatus) {
+      els.scanTargetStatus.classList.toggle("ready", fullSweep || n > 0);
+      els.scanTargetStatus.classList.toggle("missing", !fullSweep && n === 0);
+    }
+    if (els.btnChooseTypes) els.btnChooseTypes.disabled = fullSweep;
   }
 
   function updateScanBadge(status) {
@@ -1278,8 +1369,24 @@
 
   async function loadHealth() {
     const h = await api("/api/health");
-    els.hackrf.textContent = h.hackrf ? "HackRF OK" : "HackRF N/A";
-    els.hackrf.className = "badge " + (h.hackrf ? "badge-ok" : "badge-warn");
+    receiverStatus = h.radio || null;
+    const receiver = receiverStatus?.selected;
+    if (receiver === "rtl_sdr") {
+      els.hackrf.textContent = `RTL-SDR OK · RX${receiverStatus.rtl_device != null ? ` #${receiverStatus.rtl_device}` : ""}`;
+    } else if (receiver === "hackrf") {
+      els.hackrf.textContent = "HackRF OK";
+    } else {
+      els.hackrf.textContent = "Receiver N/A";
+    }
+    els.hackrf.className = "badge " + (receiver ? "badge-ok" : "badge-warn");
+    if (!txAvailable()) txArmed = false;
+    refreshTxArmUi();
+    if (els.btnReplayTx && !txAvailable()) els.btnReplayTx.disabled = true;
+    if (els.btnCloneTx && !txAvailable()) els.btnCloneTx.disabled = true;
+    if (els.btnReplayTx) els.btnReplayTx.textContent = txAvailable() ? "▶ Replay TX" : "⊘ TX unavailable";
+    if (els.btnCloneTx) els.btnCloneTx.textContent = txAvailable() ? "▶ Replay TX" : "⊘ TX unavailable";
+    if (catalog.device_types?.length) renderGrid();
+    updateSelectedCount();
     updateGpsBadge(h.gps);
     updateScanBadge(h.scan_status);
     updateVulnBadge(h.vuln_status || "idle");
@@ -1531,7 +1638,7 @@
   function trafficPopupHtml(d, ll) {
     const adsb = aeroBlock(d);
     const ais = marineBlock(d);
-    const name = d.name || d.device_type_name || d.key || "?";
+    const name = deviceDisplayName(d) || d.key || "?";
     // Clear filled traffic glyphs — line "plane" path looked like a star in popups
     const planeIco = `<span class="pop-ico pop-ico-fill" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg></span>`;
     const shipIco = `<span class="pop-ico pop-ico-fill" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 17l2 3h14l2-3H3zm1-2h16V11H12V6h3l1 2h2L16 4H8L6 8h2l1-2h3v5H4v4z"/></svg></span>`;
@@ -1602,7 +1709,7 @@
       const cap = meta.capability || "presence";
       const isPresence = cap === "presence" || !hasEmitterPosition(d);
       lines.push(
-        `<div class="pop-meta">${escapeHtml(locText(d))} · ${(d.radio || "?").toUpperCase()} · ${escapeHtml(deviceSev(d))}</div>`
+        `<div class="pop-meta">${escapeHtml(locText(d))} · ${escapeHtml(receiverLabel(d))} · ${escapeHtml(deviceSev(d))}</div>`
       );
       if (isPresence) {
         lines.push(
@@ -2427,6 +2534,7 @@
     els.grid.innerHTML = "";
     visibleTypes().forEach((dt) => {
       const band = dt.bands?.[0];
+      const supported = receiverSupportsType(dt);
       const freqLabel =
         dt.radio === "ble"
           ? "BLE"
@@ -2435,17 +2543,19 @@
             : "RF";
       const cap = dt.capability || (dt.metadata || {}).capability || "presence";
       const card = document.createElement("div");
-      card.className = "device-card" + (selected.has(dt.id) ? " selected" : "");
+      card.className = "device-card" + (selected.has(dt.id) ? " selected" : "") + (!supported ? " disabled" : "");
+      if (!supported) card.title = "Outside the selected receiver tuning range";
       card.innerHTML = `
         <div class="check">${selected.has(dt.id) ? "✓" : ""}</div>
         <div class="type-icon-lg mono-ico">${typeGlyph(dt)}</div>
         <div>
           <h3>${escapeHtml(dt.name)}${(dt.wow && dt.wow.tier === "wow") ? ' <span class="wow-pill">WOW</span>' : ""}</h3>
           <p>${escapeHtml(dt.description || "")}</p>
-          <span class="tag">${dt.radio.toUpperCase()} · ${freqLabel}</span>
+          <span class="tag">${escapeHtml(receiverLabel(dt))} · ${freqLabel}${supported ? "" : " · OUT OF RANGE"}</span>
           <span class="cap-pill cap-${escapeHtml(cap)}">${escapeHtml(cap)}</span>
         </div>`;
       card.onclick = () => {
+        if (!supported) return;
         if (selected.has(dt.id)) selected.delete(dt.id);
         else selected.add(dt.id);
         updateSelectedCount();
@@ -2453,6 +2563,22 @@
       };
       els.grid.appendChild(card);
     });
+  }
+
+  function receiverSupportsType(dt) {
+    if (dt.radio !== "hackrf" || !receiverStatus?.selected) return true;
+    const limits = receiverStatus.frequency_range_mhz;
+    if (!Array.isArray(limits) || limits.length !== 2) return true;
+    const [rxLo, rxHi] = limits.map(Number);
+    return (dt.bands || []).some((band) => {
+      const lo = Number(band.freq_min_mhz);
+      const hi = Number(band.freq_max_mhz);
+      return Number.isFinite(lo) && Number.isFinite(hi) && hi >= rxLo && lo <= rxHi;
+    });
+  }
+
+  function txAvailable() {
+    return receiverStatus?.tx_capable === true && receiverStatus?.selected === "hackrf";
   }
 
   function setDevices(list) {
@@ -2520,7 +2646,7 @@
             if (w) bits.push(`${w} writable`);
             bits.push(deviceSev(d));
             return `<li data-key="${escapeHtml(d.key)}">
-              <strong>${escapeHtml(d.name || d.device_type_name || d.mac || d.key)}</strong>
+              <strong>${escapeHtml(deviceDisplayName(d) || d.mac || d.key)}</strong>
               <span class="hint">${escapeHtml(bits.join(" · "))}</span>
             </li>`;
           })
@@ -2970,7 +3096,7 @@
                 const level = d.signal_level || 0;
                 const pct = level * 10;
                 const risk = deviceSev(d);
-                const name = d.name || d.device_type_name || "?";
+                const name = deviceDisplayName(d);
                 const live = scanRunning && !d.stale;
                 const dim = scanRunning && d.stale;
                 const w = deviceWow(d);
@@ -2982,8 +3108,8 @@
                   <td class="col-name">${typeIconHtml(d)} <span class="name-text">${escapeHtml(name)}</span> ${deviceBadgesHtml(d)}</td>
                   <td class="col-vendor" title="${escapeHtml(family)}">${escapeHtml(vendor)}</td>
                   <td class="col-loc">${escapeHtml(locText(d))}</td>
-                  <td><span class="radio-tag">${escapeHtml((d.radio || "?").toUpperCase())}</span></td>
-                  <td>${escapeHtml(d.device_type_name || d.device_type_id || "—")}</td>
+                  <td><span class="radio-tag">${escapeHtml(receiverLabel(d))}</span></td>
+                  <td>${escapeHtml(receiverAwareText(d.device_type_name || d.device_type_id || "—"))}</td>
                   <td><span class="risk-pill risk-${escapeHtml(risk)}">${escapeHtml(risk)}</span></td>
                   <td class="col-signal">
                     <div class="db-label">${escapeHtml(strengthText(d))}</div>
@@ -3014,7 +3140,7 @@
           const level = d.signal_level || 0;
           const pct = level * 10;
           const risk = deviceSev(d);
-          const name = d.name || d.device_type_name || "?";
+          const name = deviceDisplayName(d);
           const live = scanRunning && !d.stale;
           const dim = scanRunning && d.stale;
           const sel = triageSelected.has(key) ? " triage-selected" : "";
@@ -3035,10 +3161,10 @@
               <div class="db-label">${escapeHtml(strengthText(d))}</div>
               <div class="sig-bar"><div class="sig-fill ${levelClass(level)}" style="width:${pct}%"></div></div>
             </div>
-            <span class="radio-tag">${escapeHtml((d.radio || "?").toUpperCase())}</span>
+            <span class="radio-tag">${escapeHtml(receiverLabel(d))}</span>
             <span class="risk-pill risk-${escapeHtml(risk)}">${escapeHtml(risk)}</span>
             <div class="row-meta">
-              <div class="sub">${escapeHtml(d.device_type_name || "")}</div>
+              <div class="sub">${escapeHtml(receiverAwareText(d.device_type_name || ""))}</div>
               <div class="hits">×${d.hit_count || 1}</div>
             </div>
           </article>`;
@@ -3051,7 +3177,7 @@
           const level = d.signal_level || 0;
           const pct = level * 10;
           const risk = deviceSev(d);
-          const name = d.name || d.device_type_name || "?";
+          const name = deviceDisplayName(d);
           const live = scanRunning && !d.stale;
           const dim = scanRunning && d.stale;
           const w = deviceWow(d);
@@ -3074,7 +3200,7 @@
             <div class="sig-bar"><div class="sig-fill ${levelClass(level)}" style="width:${pct}%"></div></div>
             <div class="db-label">${escapeHtml(strengthText(d))}</div>
             <div class="card-foot">
-              <span class="radio-tag">${escapeHtml((d.radio || "?").toUpperCase())}</span>
+              <span class="radio-tag">${escapeHtml(receiverLabel(d))}</span>
               <span class="risk-pill risk-${escapeHtml(risk)}">${escapeHtml(risk)}</span>
               <span class="hits">×${d.hit_count || 1}</span>
             </div>
@@ -3105,7 +3231,7 @@
     els.focusEmpty.classList.add("hidden");
     els.focusPanel.classList.remove("hidden");
 
-    const name = d.name || d.device_type_name || "?";
+    const name = deviceDisplayName(d);
     const level =
       lastSample?.device_key === d.key && lastSample.level != null
         ? lastSample.level
@@ -3170,8 +3296,8 @@
       ["Key", d.key],
       ["MAC / ID", d.mac || d.id || null],
       ["Loc", locText(d)],
-      ["Radio", (d.radio || "").toUpperCase()],
-      ["Type", d.device_type_name],
+      ["Radio", receiverLabel(d)],
+      ["Type", receiverAwareText(d.device_type_name)],
       ["Freq", d.freq_mhz != null ? `${Number(d.freq_mhz).toFixed(3)} MHz` : null],
       ["Bandwidth", bwMhz],
       ["Power", d.power_dbm != null ? `${d.power_dbm} dBm` : null],
@@ -3256,8 +3382,11 @@
     }
     if (els.btnDive) {
       // Always keep Deep dive — FPV uses the dedicated button (avoids duplicate labels)
-      els.btnDive.textContent = "Deep dive";
-      els.btnDive.title = fpvTarget
+      const adsbTarget = isAdsbDevice(d);
+      els.btnDive.textContent = adsbTarget ? "✈ Decode ADS-B" : "Deep dive";
+      els.btnDive.title = adsbTarget
+        ? "Listen at 1090 MHz and decode Mode-S / ADS-B aircraft"
+        : fpvTarget
         ? "General deep dive (use Decode FPV for analog video frames)"
         : "Deep dive analysis";
     }
@@ -3503,7 +3632,7 @@
     if (els.focusWowHint) {
       if (fpvTarget) {
         els.focusWowHint.textContent =
-          "FPV: pulsa «Decode FPV» con un VTX analógico activo. Digital (DJI/Walksnail) no se decodifica.";
+          "FPV: press ‘Decode FPV’ while an analog VTX is active. Digital systems (DJI/Walksnail) cannot be decoded.";
       } else if (w.tier === "wow") {
         els.focusWowHint.innerHTML = `<span class="wow-pill">WOW</span> ${escapeHtml(w.headline || "")} — ${escapeHtml(w.demo || "Run Attack")}`;
       } else {
@@ -3519,9 +3648,9 @@
     const byRadio = {};
     const bySev = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 };
     devices.forEach((d) => {
-      const t = d.device_type_name || d.device_type_id || "unknown";
+      const t = receiverAwareText(d.device_type_name || d.device_type_id || "unknown");
       byType[t] = (byType[t] || 0) + 1;
-      const r = (d.radio || "unknown").toLowerCase();
+      const r = receiverLabel(d).toLowerCase();
       byRadio[r] = (byRadio[r] || 0) + 1;
       let sev = deviceSev(d);
       if (!d.risk && (!d.risk_status || d.risk_status === "unknown" || d.risk_status === "suspected")) {
@@ -3850,8 +3979,14 @@
       if (!scanRunning) {
         els.btnScan.textContent = scanButtonLabel(selectedMode());
       }
+      updateSelectedCount();
     });
   });
+  if (els.btnChooseTypes) {
+    els.btnChooseTypes.onclick = () => {
+      document.querySelector("#device-types-heading")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  }
   syncModeHint();
 
   function bindFilters() {
@@ -3948,6 +4083,7 @@
       mode,
       live_decode: mode !== "full_sweep",
       clear_results: !!clearResults,
+      exclude_fm_broadcast: mode === "full_sweep" && !!els.excludeFmBroadcast?.checked,
     };
 
     if (clearResults) {
@@ -3959,13 +4095,13 @@
       els.log.textContent = "";
       log(
         mode === "full_sweep"
-          ? "Starting full spectrum sweep (HackRF 1–6000 MHz)…"
+          ? `Starting full spectrum sweep (${receiverRangeText()}${body.exclude_fm_broadcast ? ", FM 87.5–108 MHz excluded" : ""})…`
           : `Starting ${mode} (fresh)…`
       );
     } else {
       log(
         mode === "full_sweep"
-          ? `Full sweep — keeping ${devices.length} device(s)…`
+          ? `Full sweep${body.exclude_fm_broadcast ? " (FM excluded)" : ""} — keeping ${devices.length} device(s)…`
           : `Resuming ${mode} — keeping ${devices.length} device(s)…`
       );
     }
@@ -3987,12 +4123,15 @@
   els.btnScan.onclick = async () => {
     const mode = selectedMode();
     if (mode !== "full_sweep" && !selected.size) {
-      alert("Select at least one device type (or choose Full sweep).");
+      document.querySelector("#device-types-heading")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      alert("No scan targets are selected. Choose one or more Device types in the left sidebar, or select Full sweep. The checkboxes in the center table are only for vulnerability triage.");
       return;
     }
     if (mode === "full_sweep") {
+      const range = receiverStatus?.frequency_range_mhz;
+      const rangeText = Array.isArray(range) ? `${range[0]}–${range[1]} MHz` : "the receiver range";
       const go = confirm(
-        "Full spectrum sweep covers HackRF 1–6000 MHz in ~100 MHz chunks.\n" +
+        `Full spectrum sweep covers ${rangeText} in ~100 MHz chunks.\n` +
           "This can take several minutes. Continue?"
       );
       if (!go) return;
@@ -4003,19 +4142,19 @@
       return;
     }
     openConfirm({
-      title: mode === "full_sweep" ? "Full spectrum sweep" : "¿Cómo quieres arrancar?",
-      subtitle: `${n} device(s) en el tracker`,
-      okLabel: "Continuar (mantener)",
+      title: mode === "full_sweep" ? "Full spectrum sweep" : "How do you want to start?",
+      subtitle: `${n} device(s) in the tracker`,
+      okLabel: "Continue and keep results",
       okClass: "btn-wardrive",
-      altLabel: "Empezar de cero",
+      altLabel: "Start fresh",
       bodyHtml: `
         <p>${
           mode === "full_sweep"
-            ? "Barrido completo 1–6000 MHz. Puedes acumular hits o empezar limpio."
-            : "Puedes <strong>parar y arrancar</strong> sin perder lo ya encontrado."
+            ? `Full sweep of ${receiverRangeText()}. You can accumulate hits or start fresh.`
+            : "You can <strong>stop and restart</strong> without losing previous detections."
         }</p>
-        <p class="confirm-count">${n} device(s) guardados · GPS trail se mantiene al continuar</p>
-        <p class="hint"><strong>Continuar</strong> acumula hits. <strong>Empezar de cero</strong> borra devices + trail (como Cleanup).</p>`,
+        <p class="confirm-count">${n} saved device(s) · continuing preserves the GPS trail</p>
+        <p class="hint"><strong>Continue</strong> accumulates hits. <strong>Start fresh</strong> clears devices and the trail, like Cleanup.</p>`,
       onOk: () => doStartScan({ clearResults: false }),
       onAlt: () => doStartScan({ clearResults: true }),
     });
@@ -4056,7 +4195,7 @@
     els.confirmTitle.textContent = title || "Confirm";
     els.confirmSubtitle.textContent = subtitle || "";
     els.confirmBody.innerHTML = bodyHtml || "";
-    els.btnConfirmOk.textContent = okLabel || "Confirmar";
+    els.btnConfirmOk.textContent = okLabel || "Confirm";
     els.btnConfirmOk.className = "btn " + (okClass || "btn-danger");
     confirmOnOk = typeof onOk === "function" ? onOk : null;
     confirmOnAlt = typeof onAlt === "function" ? onAlt : null;
@@ -4099,11 +4238,11 @@
     openConfirm({
       title: "Cleanup results?",
       subtitle: "This cannot be undone from the UI",
-      okLabel: "Sí, borrar todo",
+      okLabel: "Yes, delete everything",
       bodyHtml: `
-        <p>Vas a <strong>borrar todos los devices detectados</strong> (RF/BLE + Wi‑Fi), el historial de señal, el triage de vulns y el focus actual.</p>
-        <p class="hint">Si hay un wardrive, monitor o escaneo Wi‑Fi en marcha, también se detendrá. Empezarás de cero. Para volver a ver APs: clic en el badge Wi‑Fi o arranca un wardrive.</p>
-        <p class="confirm-count">${n ? `${n} item(s) en tracker/Wi‑Fi se eliminarán.` : "El tracker ya está vacío — puedes limpiar igual."}</p>`,
+        <p>You are about to <strong>delete every detected device</strong> (RF/BLE + Wi-Fi), signal history, vulnerability triage, and the current focus.</p>
+        <p class="hint">Any running wardrive, monitor, or Wi-Fi scan will also stop. To discover access points again, click the Wi-Fi badge or start a wardrive.</p>
+        <p class="confirm-count">${n ? `${n} tracker/Wi-Fi item(s) will be removed.` : "The tracker is already empty; cleanup is still safe."}</p>`,
       onOk: async () => {
         log("Cleanup…");
         updateScanBadge("stopped");
@@ -4236,12 +4375,12 @@
       }
       openConfirm({
         title: "Decode all TPMS?",
-        subtitle: "HackRF listen ~20s per target · rtl_433",
-        okLabel: "Sí, decodificar",
+        subtitle: `${receiverStatus?.selected === "rtl_sdr" ? "RTL-SDR" : "HackRF"} listen ~20s per target · rtl_433`,
+        okLabel: "Yes, decode",
         bodyHtml: `
-          <p>Vas a deep-divear hasta <strong>16</strong> candidatos TPMS (rankeados cerca de 315 / 433.92 MHz).</p>
+          <p>This will deep-dive up to <strong>16</strong> TPMS candidates ranked near 315 / 433.92 MHz.</p>
           <p class="confirm-count">${tpms.length} tracked · ${pending} pending · ~${Math.min(16, pending || tpms.length) * 20}s peor caso</p>
-          <p class="hint">Para el coche/rueda en movimiento mientras corre. Stop all cancela. Ya decodificados se saltan.</p>`,
+          <p class="hint">Keep the vehicle or wheel moving while it runs. “Stop all” cancels; previously decoded devices are skipped.</p>`,
         onOk: async () => {
           log("TPMS decode-all…");
           try {
@@ -4591,7 +4730,7 @@
   function openReplayModal(d) {
     replayTarget = d;
     replayCaptureId = null;
-    const name = d.name || d.device_type_name || d.key || "device";
+    const name = deviceDisplayName(d) || d.key || "device";
     const loc =
       d.mac ||
       (d.freq_mhz != null ? `${Number(d.freq_mhz).toFixed(3)} MHz` : "—");
@@ -4602,18 +4741,20 @@
     els.replaySubtitle.textContent = deviceWow(d).headline || "Authorized lab use only";
     els.btnReplayTx.disabled = true;
     els.btnReplayListen.disabled = !isRf;
-    els.btnReplayListen.textContent = isRf ? "🎧 Escuchar (~12s)" : "🎧 Escuchar (RF only)";
+    els.btnReplayListen.textContent = isRf ? "🎧 Listen (~12s)" : "🎧 Listen (RF only)";
 
     els.replayBody.innerHTML = `
       <p>Target: <strong>${escapeHtml(name)}</strong></p>
-      <p class="confirm-count">${escapeHtml(String(loc))} · ${escapeHtml(radio.toUpperCase())}</p>
+      <p class="confirm-count">${escapeHtml(String(loc))} · ${escapeHtml(receiverLabel(d))}</p>
       ${
-        isRf
-          ? `<p class="hint">1) Pulsa <strong>Escuchar</strong> y, mientras captura, activa el mando/sensor.<br>
-             2) Si oye ráfagas o decodifica frames, activa <strong>Replicar TX</strong>.</p>`
-          : `<p class="hint">Este target es BLE — no hay listen/TX con HackRF. Usa el probe GATT o elige un mando RF.</p>`
+        isRf && txAvailable()
+          ? `<p class="hint">1) Press <strong>Listen</strong>, then activate the remote or sensor during capture.<br>
+             2) If bursts or frames are detected, use <strong>Replay TX</strong>.</p>`
+          : isRf
+            ? `<p class="hint">RTL-SDR RX only — IQ listen, decode, and analysis are available; transmission is disabled.</p>`
+            : `<p class="hint">This is a BLE target, so RF listen/TX is unavailable. Use the GATT probe or select an RF remote.</p>`
       }
-      <div id="replay-status" class="replay-status">Listo para escuchar.</div>
+      <div id="replay-status" class="replay-status">Ready to listen.</div>
       ${
         isRf
           ? ""
@@ -4651,8 +4792,8 @@
     els.btnReplayListen.disabled = true;
     setReplayStatus(
       `<div class="spinner" style="width:18px;height:18px;margin-bottom:0.5rem"></div>
-       <strong>HackRF en escucha…</strong><br>
-       Pulsa el mando ahora (${Number(replayTarget.freq_mhz).toFixed(3)} MHz).`,
+       <strong>${escapeHtml(receiverLabel(replayTarget))} listening…</strong><br>
+       Activate the remote now (${Number(replayTarget.freq_mhz).toFixed(3)} MHz).`,
       "listening"
     );
     log(`Listen @ ${replayTarget.freq_mhz} MHz…`);
@@ -4662,8 +4803,8 @@
         body: JSON.stringify({ device: replayTarget, duration_s: 12 }),
       });
       if (!res.ok) {
-        setReplayStatus(escapeHtml(res.error || "Listen failed"), "fail");
-        log("Listen failed: " + (res.error || ""));
+        setReplayStatus(escapeHtml(res.error || res.detail || "Listen failed"), "fail");
+        log("Listen failed: " + (res.error || res.detail || "unknown error"));
         return;
       }
       replayCaptureId = res.capture_id;
@@ -4691,7 +4832,7 @@
             }</div>`,
             res.replay_ready ? "ok" : "fail"
           );
-      els.btnReplayTx.disabled = !res.replay_ready;
+      els.btnReplayTx.disabled = !res.replay_ready || !txAvailable();
       log(
         `Listen ${res.capture_id}: ready=${res.replay_ready} bursts=${a.burst_count || 0} decoded=${res.decoded_count || 0}`
       );
@@ -4706,12 +4847,16 @@
 
   els.btnReplayTx.onclick = () => {
     if (!replayCaptureId || replayBusy) return;
+    if (!txAvailable()) {
+      setReplayStatus("TX disabled — RTL-SDR is receive-only.", "fail");
+      return;
+    }
     if (!txArmed) {
       openConfirm({
         title: "TX is disarmed",
         subtitle: "Lab safety interlock",
         okLabel: "Arm TX now",
-        bodyHtml: `<p>Debes <strong>armar TX</strong> antes de retransmitir (bandas 315/433/868, gain ≤20).</p>`,
+        bodyHtml: `<p>You must <strong>arm TX</strong> before retransmitting (315/433/868 MHz bands, gain ≤20).</p>`,
         onOk: async () => {
           await setTxArmed(true);
           els.btnReplayTx.click();
@@ -4722,12 +4867,12 @@
     const d = replayTarget;
     const freq = d?.freq_mhz != null ? Number(d.freq_mhz).toFixed(3) + " MHz" : "?";
     openConfirm({
-      title: "Transmitir captura?",
+      title: "Transmit capture?",
       subtitle: "HackRF TX — authorized lab only",
-      okLabel: "Sí, transmitir",
+      okLabel: "Yes, transmit",
       bodyHtml: `
-        <p>Vas a <strong>retransmitir</strong> la captura <span class="confirm-count">${escapeHtml(replayCaptureId)}</span> en ${escapeHtml(freq)}.</p>
-        <p class="hint">Esto emite RF de verdad. Solo en lab autorizado.</p>`,
+        <p>You are about to <strong>retransmit</strong> capture <span class="confirm-count">${escapeHtml(replayCaptureId)}</span> at ${escapeHtml(freq)}.</p>
+        <p class="hint">This emits real RF. Use only in an authorized lab.</p>`,
       onOk: async () => {
         replayBusy = true;
         els.btnReplayTx.disabled = true;
@@ -4781,7 +4926,7 @@
         } finally {
           clearInterval(anim);
           replayBusy = false;
-          els.btnReplayTx.disabled = !replayCaptureId;
+          els.btnReplayTx.disabled = !replayCaptureId || !txAvailable();
           setTimeout(hideTxLiveProgress, 2500);
         }
       },
@@ -4940,7 +5085,7 @@
     } finally {
       stopCloneTxAnim();
       cloneBusy = false;
-      if (els.btnCloneTx) els.btnCloneTx.disabled = !cloneCaptureId;
+      if (els.btnCloneTx) els.btnCloneTx.disabled = !cloneCaptureId || !txAvailable();
       if (els.btnCloneRecord) els.btnCloneRecord.disabled = !clonePreset;
       if (els.btnCloneLive) els.btnCloneLive.disabled = false;
       setTimeout(hideCloneTxProgress, 2500);
@@ -5130,7 +5275,7 @@
     const c = cloneCenterMhz();
     setCloneStatus(
       `<strong>Live</strong> @ ${Number(c).toFixed(3)} MHz — press the remote and watch the peak.<br>
-       <span class="hint">Flat peak? Use Find freq (315 / 433 / 868 hunt). Stop wardrive if HackRF is busy.</span>`,
+       <span class="hint">Flat peak? Use Find freq (315 / 433 / 868 hunt). Stop wardrive if the receiver is busy.</span>`,
       "listening"
     );
     pollCloneSpectrum();
@@ -5164,7 +5309,11 @@
     if (!clonePreset && clonePresets[0]) selectClonePreset(clonePresets[0].id);
     else renderClonePresets();
     drawCloneSpectrum([], null, null);
-    setCloneStatus("Authorized lab use only · stop wardrive if HackRF is busy · Arm TX before replay.");
+    setCloneStatus(
+      txAvailable()
+        ? "Authorized lab use only · stop wardrive if HackRF is busy · Arm TX before replay."
+        : "RTL-SDR RX only · spectrum, IQ recording, and analysis available · TX disabled."
+    );
     if (els.cloneModal) els.cloneModal.classList.remove("hidden");
   }
 
@@ -5225,7 +5374,7 @@
            <div class="hint" style="margin:0.35rem 0">${escapeHtml(res.note || "")}</div>
            ${cons}
            <div style="margin-top:0.4rem;max-height:10rem;overflow:auto">${rows || "<div class='hint'>No CAPs</div>"}</div>
-           <div class="hint" style="margin-top:0.35rem">● strong = use for TX · ○ weak = mando flojo / ignora</div>`,
+           <div class="hint" style="margin-top:0.35rem">● strong = useful capture · ○ weak = weak remote signal / ignore</div>`,
           res.strong_count > 0 ? "ok" : "listening"
         );
         log(`CLONE compare: strong=${res.strong_count} weak=${res.weak_count} consensus=${res.consensus?.hex || "—"}`);
@@ -5354,8 +5503,8 @@
           }),
         });
         if (!res.ok) {
-          setCloneStatus(escapeHtml(res.error || "Listen failed"), "fail");
-          log("CLONE listen failed: " + (res.error || ""));
+          setCloneStatus(escapeHtml(res.error || res.detail || "Listen failed"), "fail");
+          log("CLONE listen failed: " + (res.error || res.detail || "unknown error"));
           return;
         }
         cloneCaptureId = res.capture_id;
@@ -5430,7 +5579,7 @@
            }</div>`,
           res.replay_ready ? (rolling ? "listening" : "ok") : "fail"
         );
-        if (els.btnCloneTx) els.btnCloneTx.disabled = !res.replay_ready;
+        if (els.btnCloneTx) els.btnCloneTx.disabled = !res.replay_ready || !txAvailable();
         log(
           `CLONE ${res.capture_id}: ready=${res.replay_ready} bursts=${a.burst_count || 0} tx@${tune} clip=${a.clipped}`
         );
@@ -5445,6 +5594,10 @@
   }
   if (els.btnCloneTx) {
     els.btnCloneTx.onclick = () => {
+      if (!txAvailable()) {
+        setCloneStatus("TX disabled — RTL-SDR is receive-only.", "fail");
+        return;
+      }
       if (!cloneCaptureId || cloneBusy) return;
       if (!txArmed) {
         openConfirm({
@@ -5525,10 +5678,10 @@
     // lightweight device card instead of raw dump
     const meta = d.metadata || {};
     const rows = [
-      ["Name", d.name || d.device_type_name],
+      ["Name", deviceDisplayName(d)],
       ["Key", d.key],
       ["Loc", locText(d)],
-      ["Radio", (d.radio || "").toUpperCase()],
+      ["Radio", receiverLabel(d)],
       ["Signal", strengthText(d)],
       ["Severity", deviceSev(d)],
       ["Profile", meta.attack_profile],
@@ -5567,6 +5720,12 @@
   $(".modal-backdrop").onclick = () => els.modal.classList.add("hidden");
 
   async function setTxArmed(armed) {
+    if (armed && !txAvailable()) {
+      txArmed = false;
+      refreshTxArmUi();
+      log("TX unavailable — RTL-SDR is receive-only");
+      return;
+    }
     const res = await api("/api/tx/arm", {
       method: "POST",
       body: JSON.stringify({
@@ -5581,6 +5740,15 @@
 
   function refreshTxArmUi() {
     if (!els.btnTxArm) return;
+    if (!txAvailable()) {
+      txArmed = false;
+      els.btnTxArm.textContent = "⊘ TX unavailable (RX only)";
+      els.btnTxArm.disabled = true;
+      els.btnTxArm.classList.remove("btn-attack");
+      if (els.txArmHint) els.txArmHint.textContent = "RTL-SDR is receive-only. IQ recording and analysis remain available.";
+      return;
+    }
+    els.btnTxArm.disabled = false;
     els.btnTxArm.textContent = txArmed ? "🔓 TX ARMED" : "🔒 TX disarmed";
     els.btnTxArm.classList.toggle("btn-attack", txArmed);
     if (els.txArmHint) {

@@ -29,6 +29,7 @@ from . import (
     vuln_scan,
     wifi_scanner,
     wow,
+    radio,
 )
 
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
@@ -77,6 +78,7 @@ class ScanRequest(BaseModel):
     mode: Literal["once", "wardrive", "full_sweep"] = "wardrive"
     live_decode: bool = True
     clear_results: bool = False  # False = keep tracked devices across stop/start
+    exclude_fm_broadcast: bool = False
 
 
 class TargetRequest(BaseModel):
@@ -138,17 +140,22 @@ class CloneHuntRequest(BaseModel):
 
 @app.get("/api/health")
 def health() -> dict:
-    hackrf = _hackrf_ok()
+    radio_status = radio.status()
+    hackrf = radio_status["available"].get("hackrf", False)
+    tx_status = tx_safety.status()
+    if not radio_status.get("tx_capable") and tx_status.get("armed"):
+        tx_status = tx_safety.set_armed(False, "Auto-disarmed: selected receiver is RX-only")
     return {
         "status": "ok",
         "version": "2.2.0",
         "hackrf": hackrf,
+        "radio": radio_status,
         "scan_status": scanner.session.status,
         "scan_mode": scanner.session.mode,
         "monitor_status": monitor.monitor.status,
         "vuln_status": vuln_scan.vuln_scan.status,
         "tracked": len(tracker.tracker.snapshot()),
-        "tx_armed": tx_safety.status()["armed"],
+        "tx_armed": tx_status["armed"],
         "scan_paused": scanner.session.is_paused(),
         "gps": gps.gps.status_dict(),
         "wifi": wifi_scanner.wifi.status_dict(),
@@ -156,22 +163,20 @@ def health() -> dict:
 
 
 def _hackrf_ok() -> bool:
-    import shutil
-    import subprocess
-
-    if not shutil.which("hackrf_info"):
-        return False
-    try:
-        r = subprocess.run(["hackrf_info"], capture_output=True, timeout=5)
-        return r.returncode == 0 and b"Found HackRF" in r.stdout
-    except Exception:
-        return False
+    return bool(radio.available_backends(probe=True).get("hackrf"))
 
 
 @app.get("/api/catalog")
 def get_catalog() -> dict:
     types = catalog.get_device_types()
+    radio_status = radio.status()
+    selected = radio_status.get("selected")
+    limits = radio_status.get("frequency_range_mhz")
     for t in types:
+        if t.get("id") == "full_spectrum" and selected == "rtl_sdr" and limits:
+            lo, hi = limits
+            t["name"] = f"Full spectrum (RTL-SDR {lo:g}–{hi:g} MHz)"
+            t["description"] = "Full receive-range survey using rtl_power"
         t["wow"] = wow.wow_info({
             "metadata": {"attack_profile": t.get("attack_profile")},
             "attack_profile": t.get("attack_profile"),
@@ -269,6 +274,7 @@ def scan_start(req: ScanRequest) -> dict:
             mode=req.mode,
             live_decode=req.live_decode and req.mode != "full_sweep",
             clear_results=req.clear_results,
+            exclude_fm_broadcast=req.exclude_fm_broadcast,
         )
     except RuntimeError as exc:
         return {"ok": False, "error": str(exc)}
@@ -279,6 +285,7 @@ def scan_start(req: ScanRequest) -> dict:
         "mode": req.mode,
         "live_decode": req.live_decode and req.mode != "full_sweep",
         "clear_results": req.clear_results,
+        "exclude_fm_broadcast": req.exclude_fm_broadcast and req.mode == "full_sweep",
         "tracked": kept,
     }
 
@@ -465,7 +472,16 @@ def api_artifact(dive_id: str, filename: str):
 
 @app.get("/api/tx/status")
 def api_tx_status() -> dict:
-    return {"ok": True, **tx_safety.status()}
+    selected = radio.selected_backend(probe=True)
+    state = tx_safety.status()
+    if selected != "hackrf" and state.get("armed"):
+        state = tx_safety.set_armed(False, "Auto-disarmed: selected receiver is RX-only")
+    return {
+        "ok": True,
+        "tx_capable": selected == "hackrf",
+        "radio_backend": selected,
+        **state,
+    }
 
 
 @app.get("/api/gps/status")
@@ -526,6 +542,16 @@ def api_wifi_clear() -> dict:
 
 @app.post("/api/tx/arm")
 def api_tx_arm(req: TxArmRequest) -> dict:
+    selected = radio.selected_backend(probe=True)
+    if req.armed and selected != "hackrf":
+        state = tx_safety.set_armed(False, f"TX rejected: {selected or 'no receiver'} is RX-only")
+        return {
+            "ok": False,
+            "error": "TX requires an active HackRF; RTL-SDR is receive-only",
+            "tx_capable": False,
+            "radio_backend": selected,
+            **state,
+        }
     return {"ok": True, **tx_safety.set_armed(req.armed, req.note)}
 
 
@@ -552,9 +578,12 @@ def api_replay_compare(lo_mhz: float = 280.0, hi_mhz: float = 320.0, limit: int 
 
     return capture_compare.compare_band(lo_mhz, hi_mhz, limit=limit)
 
-    """HackRF RX on target freq — capture IQ + optional rtl_433 decode."""
+
+@app.post("/api/replay/listen")
+def api_replay_listen(req: ReplayListenRequest) -> dict:
+    """SDR RX on target frequency — capture IQ and optionally decode it."""
     if scanner.session.is_running():
-        return {"ok": False, "error": "Stop wardrive first — HackRF is busy"}
+        return {"ok": False, "error": "Stop wardrive first — the SDR receiver is busy"}
     if monitor.monitor.status == "running":
         monitor.monitor.stop()
     return replay.listen(

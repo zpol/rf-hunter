@@ -1,0 +1,34 @@
+# Receiver configuration. All capture backends normalize output to signed,
+# interleaved 8-bit IQ (cs8) before returning it to RF Hunter.
+#
+# RF_HUNTER_RADIO=auto|hackrf|rtl_sdr overrides `selected`.
+# RF_HUNTER_RADIO_CONFIG=/path/to/file.yaml can replace this file.
+selected: auto
+
+backends:
+  hackrf:
+    enabled: true
+    priority: 10
+    rx_only: false
+    freq_min_mhz: 1
+    freq_max_mhz: 6000
+    commands:
+      info: hackrf_info
+      capture: hackrf_transfer
+      sweep: hackrf_sweep
+    serial: ""                 # or set HACKRF_SERIAL
+
+  rtl_sdr:
+    enabled: true
+    priority: 20
+    rx_only: true
+    device: "0"                # or set RTL_SDR_DEVICE
+    freq_min_mhz: 24            # tuner-dependent; adjust for an upconverter
+    freq_max_mhz: 1766
+    sample_rate_min: 225001
+    sample_rate_max: 3200000
+    gain_db: auto               # number, "auto", or RTL_SDR_GAIN override
+    commands:
+      info: rtl_test
+      capture: rtl_sdr
+      sweep: rtl_power

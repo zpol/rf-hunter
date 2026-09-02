@@ -196,7 +196,7 @@ device_types:
     - FLEX
     - generic_fsk
 - id: ism_868_domotica
-  name: Domótica 868 MHz
+  name: Home Automation 868 MHz
   category: iot
   description: LoRa-adjacent, LightwaveRF, Eurodomo, heat meters
   radio: hackrf
