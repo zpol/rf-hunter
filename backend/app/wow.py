@@ -61,7 +61,7 @@ WOW_PROFILES: dict[str, dict[str, Any]] = {
         "demo": "Deep dive @ ~315 MHz while sensor TX",
     },
     "lora_eu": {"score": 35, "tier": "niche", "headline": "LoRa presence", "demo": "Detect only"},
-    "ism_868": {"score": 45, "tier": "solid", "headline": "Domótica 868", "demo": "Capture bursts"},
+    "ism_868": {"score": 45, "tier": "solid", "headline": "Home automation 868", "demo": "Capture bursts"},
     "cw_telemetry": {"score": 30, "tier": "niche", "headline": "CW telemetry", "demo": "Spectrum only"},
     "fm_voice": {"score": 25, "tier": "niche", "headline": "PMR voice", "demo": "Low demo value"},
     "dect": {"score": 30, "tier": "niche", "headline": "DECT base", "demo": "Presence"},

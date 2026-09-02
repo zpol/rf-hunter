@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from . import radio as radio_mod
 
 HACKRF_SERIAL = os.environ.get("HACKRF_SERIAL", "").strip()
 
@@ -331,27 +332,20 @@ def capture_iq(
     freq_hz = int(round(float(freq_mhz) * 1e6))
     # Baseband filter ~0.75 * rate, capped
     bb = min(int(sample_rate * 0.75), 14_000_000)
-    cmd = [
-        "hackrf_transfer",
-        "-r", str(out_path),
-        "-f", str(freq_hz),
-        "-s", str(sample_rate),
-        "-n", str(n),
-        "-l", str(int(lna_db)),
-        "-g", str(int(vga_db)),
-        "-a", "0",
-        "-b", str(bb),
-    ]
-    if HACKRF_SERIAL:
-        cmd = ["hackrf_transfer", "-d", HACKRF_SERIAL] + cmd[1:]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=duration_s + 25)
+        capture = radio_mod.capture_iq(
+            out_path, freq_hz=freq_hz, sample_rate=sample_rate,
+            num_samples=n, lna_db=lna_db, vga_db=vga_db,
+            bandwidth_hz=bb, timeout=duration_s + 25,
+        )
         ok = out_path.exists() and out_path.stat().st_size > 100_000
         return {
-            "ok": ok,
-            "exit": proc.returncode,
+            "ok": ok and capture.ok,
+            "exit": capture.returncode,
             "bytes": out_path.stat().st_size if out_path.exists() else 0,
-            "stderr_tail": (proc.stderr or "")[-400:],
+            "stderr_tail": capture.stderr[-400:],
+            "radio_backend": capture.backend,
+            **({"error": capture.error} if capture.error else {}),
             "sample_rate": sample_rate,
             "duration_s": duration_s,
             "freq_mhz": freq_mhz,

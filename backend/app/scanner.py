@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import os
 import statistics
@@ -17,11 +18,46 @@ from . import ble_scanner
 from . import tracker as tracker_mod
 from .models import DetectedDevice
 from .procutil import kill_process_tree, pkill_rf_tools
+from . import radio as radio_mod
 
 # Default to sibling captures dir (bare metal). Docker sets RF_HUNTER_CAPTURES=/data/...
 _DEFAULT_CAPTURES = Path(__file__).resolve().parents[2].parent / "captures" / "rf-hunter-v2"
 CAPTURES = Path(os.environ.get("RF_HUNTER_CAPTURES", str(_DEFAULT_CAPTURES)))
 HACKRF_SERIAL = os.environ.get("HACKRF_SERIAL", "")
+
+FM_BROADCAST_MIN_MHZ = 87.5
+FM_BROADCAST_MAX_MHZ = 108.0
+
+
+def exclude_frequency_range(
+    bands: list[dict[str, Any]],
+    exclude_min_mhz: float,
+    exclude_max_mhz: float,
+) -> list[dict[str, Any]]:
+    """Split sweep bands around an excluded interval without scanning it."""
+    excluded_min = float(exclude_min_mhz)
+    excluded_max = float(exclude_max_mhz)
+    if excluded_max <= excluded_min:
+        return [dict(band) for band in bands]
+    result: list[dict[str, Any]] = []
+    for band in bands:
+        low = float(band["freq_min_mhz"])
+        high = float(band["freq_max_mhz"])
+        if high <= excluded_min or low >= excluded_max:
+            result.append(dict(band))
+            continue
+        for part_low, part_high in (
+            (low, min(high, excluded_min)),
+            (max(low, excluded_max), high),
+        ):
+            if part_high <= part_low:
+                continue
+            part = dict(band)
+            part["freq_min_mhz"] = part_low
+            part["freq_max_mhz"] = part_high
+            part["center_mhz"] = round((part_low + part_high) / 2.0, 4)
+            result.append(part)
+    return result
 
 
 class ScanSession:
@@ -45,6 +81,7 @@ class ScanSession:
         self._paused = threading.Event()
         self._pause_reason = ""
         self.live_decode = True
+        self.exclude_fm_broadcast = False
         self._restore_last_report()
 
     def subscribe(self, cb: Callable[[dict], None]) -> None:
@@ -180,6 +217,7 @@ class ScanSession:
         mode: str = "once",
         live_decode: bool = True,
         clear_results: bool = False,
+        exclude_fm_broadcast: bool = False,
     ) -> str:
         with self._lock:
             if self.status == "running":
@@ -187,6 +225,7 @@ class ScanSession:
             self._stop.clear()
             self._paused.clear()
             self.live_decode = bool(live_decode)
+            self.exclude_fm_broadcast = bool(exclude_fm_broadcast and mode == "full_sweep")
             if mode == "full_sweep":
                 self.mode = "full_sweep"
                 device_type_ids = ["full_spectrum"]
@@ -338,6 +377,37 @@ class ScanSession:
             if not types:
                 raise ValueError("No valid device types selected")
 
+            needs_receiver = any(t.get("radio", "hackrf") != "ble" for t in types)
+            backend = radio_mod.selected_backend(probe=True) if needs_receiver else "none"
+            if needs_receiver and backend is None:
+                raise RuntimeError("No configured HackRF or RTL-SDR receiver found")
+            if self.mode == "full_sweep" and backend == "rtl_sdr":
+                limits = radio_mod.frequency_range_mhz(backend)
+                if limits:
+                    low, high = limits
+                    adjusted = []
+                    for band in types[0].get("bands", []):
+                        lo = max(low, float(band["freq_min_mhz"]))
+                        hi = min(high, float(band["freq_max_mhz"]))
+                        if hi > lo:
+                            adjusted.append({**band, "freq_min_mhz": lo, "freq_max_mhz": hi})
+                    types[0] = {
+                        **types[0],
+                        "name": f"Full spectrum (RTL-SDR {low:g}–{high:g} MHz)",
+                        "description": "Full receive-range survey using rtl_power",
+                        "bands": adjusted,
+                    }
+            if self.mode == "full_sweep" and self.exclude_fm_broadcast:
+                types[0] = {
+                    **types[0],
+                    "bands": exclude_frequency_range(
+                        list(types[0].get("bands") or []),
+                        FM_BROADCAST_MIN_MHZ,
+                        FM_BROADCAST_MAX_MHZ,
+                    ),
+                }
+                self._log("Full sweep filter: excluding FM broadcast 87.5–108 MHz")
+
             # Wardrive: short passes for walking feedback
             if self.mode == "wardrive":
                 passes = max(8, min(passes, 40))
@@ -348,7 +418,7 @@ class ScanSession:
                 n_bands = sum(len(t.get("bands") or []) for t in types)
                 self._log(
                     f"Full spectrum sweep — {n_bands} chunk(s), "
-                    f"{passes} sweep(s)/chunk, HackRF 1–6000 MHz"
+                    f"{passes} sweep(s)/chunk, {backend} receive range"
                 )
             else:
                 ble_cap = None
@@ -430,6 +500,7 @@ class ScanSession:
                 "device_types": device_type_ids,
                 "duration_s": duration_s,
                 "passes_completed": self.pass_count,
+                "exclude_fm_broadcast": self.exclude_fm_broadcast,
                 "devices": tracker_mod.tracker.snapshot(),
                 "completed_utc": datetime.now(timezone.utc).isoformat(),
             }
@@ -466,6 +537,7 @@ class ScanSession:
         ble_cap: int | None,
     ) -> None:
         t0 = time.time()
+        backend = radio_mod.selected_backend(probe=True) or "unknown"
         step = 0
         total_steps = sum(
             len(t.get("bands", [])) if t.get("radio") == "hackrf" else 1 for t in types
@@ -546,6 +618,7 @@ class ScanSession:
                             break
                         meta = {
                             **meta_base,
+                            "receiver_backend": backend,
                             "band_mhz": f"{fmin}-{fmax}",
                             "attack_profile": "adsb_1090",
                             "classification": pk.get("classification", "unknown"),
@@ -583,7 +656,8 @@ class ScanSession:
                 )
                 self.band_index = step + 1
                 self.progress = min(99, 100.0 * step / total_steps)
-                self._log(f"HackRF sweep {dt['name']}: {float(fmin):g}–{float(fmax):g} MHz")
+                receiver = radio_mod.selected_backend(probe=True) or "RF"
+                self._log(f"{receiver} sweep {dt['name']}: {float(fmin):g}–{float(fmax):g} MHz")
                 self._emit_progress(
                     fmin=float(fmin),
                     fmax=float(fmax),
@@ -610,6 +684,7 @@ class ScanSession:
                     hint = catalog_band_hint(float(pk["freq_mhz"]))
                     meta = {
                         **meta_base,
+                        "receiver_backend": backend,
                         "band_mhz": f"{float(fmin):g}-{float(fmax):g}",
                         "attack_profile": dt.get("attack_profile"),
                         "modulation_hint": meta_base.get("modulation"),
@@ -673,25 +748,14 @@ class ScanSession:
         if self._stop.is_set():
             return []
 
-        # hackrf_sweep rejects floats like "1101.0:1201.0" — integers only
-        f1 = int(round(float(fmin)))
-        f2 = int(round(float(fmax)))
-        if f2 <= f1:
-            f2 = f1 + 1
-
-        cmd = [
-            "hackrf_sweep",
-            "-f", f"{f1}:{f2}",
-            "-N", str(passes),
-            "-w", str(bin_width),
-            "-l", str(lna),
-            "-g", str(vga),
-            "-a", "0",
-            "-r", str(out_csv),
-        ]
-
-        if HACKRF_SERIAL:
-            cmd = ["hackrf_sweep", "-d", HACKRF_SERIAL] + cmd[1:]
+        try:
+            _backend, cmd = radio_mod.sweep_command(
+                fmin, fmax, passes=passes, bin_width_hz=bin_width,
+                lna_db=lna, vga_db=vga, out_csv=out_csv,
+            )
+        except (RuntimeError, ValueError) as exc:
+            self._log(f"Skipping sweep: {exc}")
+            return []
 
         proc = subprocess.Popen(
             cmd,
@@ -728,8 +792,7 @@ class ScanSession:
 def _parse_sweep_peaks(path: Path, snr_min: float = 8.0) -> list[dict[str, Any]]:
     rows: list[tuple[float, float]] = []
     with path.open() as f:
-        for line in f:
-            parts = line.strip().split(", ")
+        for parts in csv.reader(f, skipinitialspace=True):
             if len(parts) < 7:
                 continue
             hz_low = int(float(parts[2]))

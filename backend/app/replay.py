@@ -15,6 +15,7 @@ from shutil import which
 from typing import Any
 
 import numpy as np
+from . import radio as radio_mod
 
 from .procutil import pkill_rf_tools
 from .radio_gate import exclusive
@@ -78,31 +79,14 @@ def listen(
     started = datetime.now(timezone.utc).isoformat()
     with exclusive("replay_listen"):
         pkill_rf_tools()
-        cmd = [
-            "hackrf_transfer",
-            "-r", str(iq_path),
-            "-f", str(freq_hz),
-            "-s", str(rate),
-            "-l", str(lna_db),
-            "-g", str(vga_db),
-            "-a", "0",
-            "-n", str(samples),
-        ]
-        if HACKRF_SERIAL:
-            cmd[1:1] = ["-d", HACKRF_SERIAL]
-
-        try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=duration_s + 25
-            )
-            hackrf_exit = proc.returncode
-            stderr_tail = (proc.stderr or "")[-400:]
-        except subprocess.TimeoutExpired as e:
-            return {"ok": False, "error": f"hackrf_transfer timeout: {e}"}
-        except FileNotFoundError:
-            return {"ok": False, "error": "hackrf_transfer not found — install hackrf tools"}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
+        capture = radio_mod.capture_iq(
+            iq_path, freq_hz=freq_hz, sample_rate=rate, num_samples=samples,
+            lna_db=lna_db, vga_db=vga_db, timeout=duration_s + 25,
+        )
+        hackrf_exit = capture.returncode
+        stderr_tail = capture.stderr[-400:]
+        if capture.error:
+            return {"ok": False, "error": capture.error}
 
     size = iq_path.stat().st_size if iq_path.exists() else 0
     analysis = _analyze_listen_iq(iq_path, rate, float(freq)) if size > 1000 else {
@@ -165,6 +149,7 @@ def listen(
         "wav_am_file": artifacts.get("wav_am_file"),
         "iq_bytes": size,
         "hackrf_exit": hackrf_exit,
+        "radio_backend": capture.backend,
         "stderr_tail": stderr_tail,
         "analysis": analysis,
         "decoded": decoded[:12],
@@ -212,6 +197,12 @@ def transmit(
         meta = _load_from_disk(capture_id)
     if not meta:
         return {"ok": False, "error": f"Unknown capture_id {capture_id}"}
+    if radio_mod.selected_backend(probe=True) != "hackrf":
+        return {
+            "ok": False,
+            "error": "The selected RTL-SDR backend is receive-only; replay TX requires HackRF",
+            "capture_id": capture_id,
+        }
 
     iq_path = _resolve_tx_iq(meta, iq_source)
     if not iq_path or not iq_path.exists():

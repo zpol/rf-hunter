@@ -13,6 +13,7 @@ from . import tpms_decode
 from . import tracker as tracker_mod
 from .procutil import pkill_rf_tools
 from .radio_gate import exclusive
+from . import radio as radio_mod
 import os
 
 _DEFAULT_CAPTURES = Path(__file__).resolve().parents[2].parent / "captures" / "rf-hunter-v2"
@@ -99,15 +100,11 @@ def _decode_one(device: dict[str, Any], session_dir: Path, duration_s: int = 4) 
     out = session_dir / f"live_{uuid.uuid4().hex[:6]}"
     out.mkdir(parents=True, exist_ok=True)
     iq = out / "live.raw"
-    cmd = [
-        "hackrf_transfer", "-r", str(iq),
-        "-f", str(int(freq * 1e6)), "-s", str(rate),
-        "-l", "40", "-g", "44", "-a", "0",
-        "-n", str(rate * duration_s),
-    ]
-    if HACKRF_SERIAL:
-        cmd[1:1] = ["-d", HACKRF_SERIAL]
-    subprocess.run(cmd, capture_output=True, timeout=duration_s + 20)
+    radio_mod.capture_iq(
+        iq, freq_hz=int(freq * 1e6), sample_rate=rate,
+        num_samples=rate * duration_s, lna_db=40, vga_db=44,
+        timeout=duration_s + 20,
+    )
 
     key = device.get("key") or tracker_mod.device_key(device)
     entry = tracker_mod.tracker.get(key) or device

@@ -1,4 +1,4 @@
-"""Exclusive HackRF access — auto-pause wardrive while dive/replay/listen runs."""
+"""Exclusive SDR access — auto-pause wardrive while dive/replay/listen runs."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ _depth = 0
 @contextmanager
 def exclusive(owner: str, *, pause_scan: bool = True) -> Iterator[None]:
     """
-    Serialize HackRF users. Optionally pause an active wardrive/scan so
-    IQ capture / TX does not collide with hackrf_sweep.
+    Serialize SDR users. Optionally pause an active wardrive/scan so an IQ
+    capture does not collide with the active receiver's sweep process.
     """
     global _owner, _depth
     from . import scanner
@@ -25,7 +25,7 @@ def exclusive(owner: str, *, pause_scan: bool = True) -> Iterator[None]:
         if _depth == 0:
             _owner = owner
             if pause_scan and scanner.session.is_running():
-                scanner.session.pause(f"HackRF loaned to {owner}")
+                scanner.session.pause(f"SDR receiver loaned to {owner}")
                 paused = True
         _depth += 1
     try:

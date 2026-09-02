@@ -6,10 +6,13 @@ import csv
 import os
 import subprocess
 import time
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from .procutil import kill_process_tree, pkill_rf_tools
 from .radio_gate import exclusive
+from . import radio as radio_mod
 from . import tx_safety
 
 HACKRF_SERIAL = os.environ.get("HACKRF_SERIAL", "")
@@ -155,52 +158,17 @@ def spectrum(
 
     with exclusive("clone_spectrum"):
         pkill_rf_tools()
-        cmd = [
-            "hackrf_sweep",
-            "-f", f"{f_lo}:{f_hi}",
-            "-a", "1",
-            "-p", "1",
-            "-l", "32",
-            "-g", "40",
-            "-w", "100000",
-            "-N", "2",
-        ]
-        if HACKRF_SERIAL:
-            cmd = ["hackrf_sweep", "-d", HACKRF_SERIAL] + cmd[1:]
-
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                preexec_fn=os.setsid,
-            )
-        except FileNotFoundError:
-            return {"ok": False, "error": "hackrf_sweep not found"}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
-
-        chunks: list[str] = []
-        deadline = time.time() + 12
-        try:
-            while proc.poll() is None:
-                if time.time() > deadline:
-                    kill_process_tree(proc, grace_s=0.2)
-                    break
-                time.sleep(0.05)
-            if proc.stdout is not None:
-                try:
-                    out, _ = proc.communicate(timeout=1)
-                    if out:
-                        chunks.append(out)
-                except Exception:
-                    kill_process_tree(proc, grace_s=0.1)
-        except Exception as exc:
-            kill_process_tree(proc, grace_s=0.2)
-            return {"ok": False, "error": str(exc)}
-
-        stdout = "".join(chunks)
+        with tempfile.TemporaryDirectory(prefix="rf-hunter-spectrum-") as tmp:
+            sweep_file = Path(tmp) / "sweep.csv"
+            try:
+                _backend, cmd = radio_mod.sweep_command(
+                    f_lo, f_hi, passes=2, bin_width_hz=100_000,
+                    lna_db=32, vga_db=40, out_csv=sweep_file,
+                )
+                subprocess.run(cmd, capture_output=True, text=True, timeout=12)
+                stdout = sweep_file.read_text() if sweep_file.exists() else ""
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
 
     # Aggregate max power per ~coarse bin
     acc: dict[int, float] = {}
@@ -236,7 +204,7 @@ def spectrum(
             "peak_dbm": None,
             "noise_dbm": None,
             "bins": [],
-            "note": "No sweep bins — is HackRF connected?",
+            "note": "No sweep bins — is the selected receiver connected?",
         }
 
     items = sorted(((k * 0.2, v) for k, v in acc.items()), key=lambda x: x[0])
@@ -290,36 +258,24 @@ def hunt(*, hold_s: float = 8.0) -> dict[str, Any]:
             for lo, hi, _label in _HUNT_BANDS:
                 if time.time() >= deadline:
                     break
-                cmd = [
-                    "hackrf_sweep",
-                    "-f", f"{lo}:{hi}",
-                    "-a", "1",
-                    "-p", "1",
-                    "-l", "32",
-                    "-g", "40",
-                    "-w", "100000",
-                    "-N", "1",
-                ]
-                if HACKRF_SERIAL:
-                    cmd = ["hackrf_sweep", "-d", HACKRF_SERIAL] + cmd[1:]
-                try:
-                    proc = subprocess.run(
-                        cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=min(8.0, max(2.0, remaining)),
-                    )
-                except FileNotFoundError:
-                    return {"ok": False, "error": "hackrf_sweep not found"}
-                except subprocess.TimeoutExpired as e:
-                    out = (e.stdout or "") if isinstance(e.stdout, str) else ""
-                    _accumulate_sweep(out, acc, powers)
-                    sweeps += 1
-                    continue
-                except Exception as exc:
-                    notes.append(str(exc))
-                    continue
-                _accumulate_sweep(proc.stdout or "", acc, powers)
+                with tempfile.TemporaryDirectory(prefix="rf-hunter-hunt-") as tmp:
+                    sweep_file = Path(tmp) / "sweep.csv"
+                    try:
+                        _backend, cmd = radio_mod.sweep_command(
+                            lo, hi, passes=1, bin_width_hz=100_000,
+                            lna_db=32, vga_db=40, out_csv=sweep_file,
+                        )
+                        subprocess.run(
+                            cmd, capture_output=True, text=True,
+                            timeout=min(8.0, max(2.0, remaining)),
+                        )
+                    except subprocess.TimeoutExpired:
+                        pass
+                    except Exception as exc:
+                        notes.append(str(exc))
+                        continue
+                    out = sweep_file.read_text() if sweep_file.exists() else ""
+                _accumulate_sweep(out, acc, powers)
                 sweeps += 1
 
     if not acc:

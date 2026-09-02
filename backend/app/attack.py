@@ -11,6 +11,7 @@ from typing import Any
 
 from . import tpms_decode
 from .gatt_names import format_uuid_line
+from . import radio as radio_mod
 
 _DEFAULT_CAPTURES = Path(__file__).resolve().parents[2].parent / "captures" / "rf-hunter-v2"
 CAPTURES = Path(os.environ.get("RF_HUNTER_CAPTURES", str(_DEFAULT_CAPTURES)))
@@ -99,21 +100,17 @@ def _attack_rf(device: dict, out_dir: Path, profile: str) -> list[dict]:
     duration_s = 20 if is_tpms else 12
     from .radio_gate import exclusive
 
-    cmd = [
-        "hackrf_transfer", "-r", str(iq),
-        "-f", str(int(float(freq) * 1e6)), "-s", str(rate),
-        "-l", "40", "-g", "44", "-a", "0", "-n", str(duration_s * rate),
-    ]
-    if HACKRF_SERIAL:
-        cmd = ["hackrf_transfer", "-d", HACKRF_SERIAL] + cmd[1:]
-
     try:
         with exclusive("attack_rf"):
-            subprocess.run(cmd, capture_output=True, timeout=duration_s + 25, check=False)
+            capture = radio_mod.capture_iq(
+                iq, freq_hz=int(float(freq) * 1e6), sample_rate=rate,
+                num_samples=duration_s * rate, lna_db=40, vga_db=44,
+                timeout=duration_s + 25,
+            )
         vectors.append({
             "name": "iq_capture",
-            "success": iq.exists(),
-            "detail": f"{duration_s}s IQ @ {freq} MHz",
+            "success": capture.ok,
+            "detail": capture.error or f"{duration_s}s IQ @ {freq} MHz via {capture.backend}",
             "artifact": str(iq.name),
         })
     except Exception as e:

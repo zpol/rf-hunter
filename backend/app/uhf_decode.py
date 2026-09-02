@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from . import tpms_decode
+from . import radio as radio_mod
 
 HACKRF_SERIAL = os.environ.get("HACKRF_SERIAL", "")
 
@@ -124,17 +125,14 @@ def capture_and_decode(
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     iq = out_dir / f"uhf_{freq_mhz:.3f}MHz.raw"
-    cmd = [
-        "hackrf_transfer", "-r", str(iq),
-        "-f", str(int(freq_mhz * 1e6)),
-        "-s", str(sample_rate),
-        "-l", "40", "-g", "44", "-a", "0",
-        "-n", str(sample_rate * duration_s),
-    ]
-    if HACKRF_SERIAL:
-        cmd[1:1] = ["-d", HACKRF_SERIAL]
     try:
-        subprocess.run(cmd, capture_output=True, timeout=duration_s + 25)
+        capture = radio_mod.capture_iq(
+            iq, freq_hz=int(freq_mhz * 1e6), sample_rate=sample_rate,
+            num_samples=sample_rate * duration_s, lna_db=40, vga_db=44,
+            timeout=duration_s + 25,
+        )
+        if not capture.ok:
+            return {"ok": False, "message": capture.error or "capture failed", "freq_mhz": freq_mhz}
     except Exception as exc:
         return {"ok": False, "message": f"capture failed: {exc}", "freq_mhz": freq_mhz}
     return decode_uhf_iq(iq, freq_mhz, sample_rate=sample_rate, out_dir=out_dir)

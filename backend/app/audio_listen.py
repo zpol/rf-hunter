@@ -14,6 +14,7 @@ import numpy as np
 from .procutil import pkill_rf_tools
 from .radio_gate import exclusive
 from .uhf_decode import _write_wav_fm, is_uhf_telemetry_target
+from . import radio as radio_mod
 
 _DEFAULT_CAPTURES = Path(__file__).resolve().parents[2].parent / "captures" / "rf-hunter-v2"
 CAPTURES = Path(os.environ.get("RF_HUNTER_CAPTURES", str(_DEFAULT_CAPTURES)))
@@ -62,35 +63,19 @@ def listen_fm(device: dict[str, Any], duration_s: int = 8) -> dict[str, Any]:
     started = datetime.now(timezone.utc).isoformat()
     with exclusive("audio_listen"):
         pkill_rf_tools()
-        cmd = [
-            "hackrf_transfer",
-            "-r", str(iq_path),
-            "-f", str(freq_hz),
-            "-s", str(rate),
-            "-l", "40",
-            "-g", "44",
-            "-a", "0",
-            "-n", str(samples),
-        ]
-        if HACKRF_SERIAL:
-            cmd[1:1] = ["-d", HACKRF_SERIAL]
-        try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=duration_s + 25
-            )
-        except subprocess.TimeoutExpired as e:
-            return {"ok": False, "error": f"hackrf_transfer timeout: {e}"}
-        except FileNotFoundError:
-            return {"ok": False, "error": "hackrf_transfer not found — install hackrf tools"}
-        except Exception as e:
-            return {"ok": False, "error": str(e)}
+        capture = radio_mod.capture_iq(
+            iq_path, freq_hz=freq_hz, sample_rate=rate, num_samples=samples,
+            lna_db=40, vga_db=44, timeout=duration_s + 25,
+        )
+        if capture.error:
+            return {"ok": False, "error": capture.error}
 
     if not iq_path.is_file() or iq_path.stat().st_size < 4000:
         return {
             "ok": False,
-            "error": "IQ capture empty — check HackRF / stop other RF tools",
+            "error": "IQ capture empty — check the receiver / stop other RF tools",
             "listen_id": listen_id,
-            "hackrf_exit": getattr(proc, "returncode", None),
+            "hackrf_exit": capture.returncode,
         }
 
     try:
@@ -113,7 +98,8 @@ def listen_fm(device: dict[str, Any], duration_s: int = 8) -> dict[str, Any]:
         "started_utc": started,
         "completed_utc": datetime.now(timezone.utc).isoformat(),
         "hint": hint,
-        "hackrf_exit": proc.returncode,
+        "radio_backend": capture.backend,
+        "hackrf_exit": capture.returncode,
     }
 
 
